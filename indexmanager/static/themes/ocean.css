@@ -1,0 +1,21 @@
+/* Ocean: the original look. Deep sea-blue glass with a lime-yellow accent. */
+:root {
+  --navy: #142E3A;
+  --navy-deep: #0e222b;
+  --steel-light: #2a5a6f;
+  --accent: #E8E870;
+  --text: #e8eef1;
+  --muted: #8fa9b5;
+  --ok: #6CBF84;
+  --warn: #E8B24A;
+  --bad: #D9534F;
+  /* the same colours as r, g, b for translucent uses: rgba(var(--accent-rgb), .3) */
+  --accent-rgb: 232, 232, 112;
+  --glow-rgb: 232, 232, 112;          /* the second light in the page background */
+  --steel-rgb: 30, 68, 85;
+  --steel-light-rgb: 42, 90, 111;
+  --navy-rgb: 20, 46, 58;
+  --deep-rgb: 14, 34, 43;
+  --ink-rgb: 8, 20, 26;               /* darker than the page: wells, code blocks, the dialog backdrop */
+  --muted-rgb: 143, 169, 181;
+}

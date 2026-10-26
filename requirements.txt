@@ -1,0 +1,8 @@
+fastapi
+uvicorn
+pyodbc
+tzdata
+azure-identity
+msal-extensions
+PyMySQL[rsa]
+psycopg[binary]

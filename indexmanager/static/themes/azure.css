@@ -1,0 +1,20 @@
+/* Azure: like Ocean (dark blue glass, one bright accent) but with a Microsoft-style blue accent. */
+:root {
+  --navy: #0F2A47;
+  --navy-deep: #081726;
+  --steel-light: #1F6FB5;
+  --accent: #4FB3FF;
+  --text: #eaf2fa;
+  --muted: #8daac7;
+  --ok: #6CBF84;
+  --warn: #E8B24A;
+  --bad: #D9534F;
+  --accent-rgb: 79, 179, 255;
+  --glow-rgb: 79, 179, 255;           /* the second light in the page background */
+  --steel-rgb: 19, 68, 112;
+  --steel-light-rgb: 31, 111, 181;
+  --navy-rgb: 15, 42, 71;
+  --deep-rgb: 8, 23, 38;
+  --ink-rgb: 4, 12, 22;
+  --muted-rgb: 141, 170, 199;
+}

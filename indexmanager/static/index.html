@@ -1,0 +1,3259 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SQL Index Manager</title>
+<link rel="stylesheet" href="/theme.css">
+<style>
+  :root {
+    /* glass surfaces: translucent tints over a blurred backdrop */
+    --glass: rgba(var(--steel-rgb), .38);
+    --glass-strong: rgba(var(--navy-rgb), .62);
+    --glass-border: rgba(255, 255, 255, .14);
+    --glass-highlight: rgba(255, 255, 255, .10);
+    --blur: blur(18px) saturate(140%);
+    --shadow: 0 8px 32px rgba(0, 0, 0, .28);
+    --radius: 14px;
+  }
+  * { box-sizing: border-box; }
+  /* themed scrollbars: the thumb turns accent-coloured on hover */
+  * { scrollbar-width: thin; scrollbar-color: var(--steel-light) transparent; }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-corner { background: transparent; }
+  ::-webkit-scrollbar-thumb {
+    background: rgba(var(--muted-rgb), .30); border-radius: 10px;
+    border: 2px solid transparent; background-clip: padding-box;
+  }
+  ::-webkit-scrollbar-thumb:hover { background: rgba(var(--accent-rgb), .55); border: 2px solid transparent; background-clip: padding-box; }
+  ::-webkit-scrollbar-thumb:active { background: var(--accent); border: 2px solid transparent; background-clip: padding-box; }
+  @supports selector(::-webkit-scrollbar) { * { scrollbar-width: auto; scrollbar-color: auto; } }   /* Chromium: let the ::-webkit-scrollbar rules win */
+  [hidden] { display: none !important; }
+  body {
+    margin: 0; min-height: 100vh; display: flex; flex-direction: column; color: var(--text); font: 14px/1.45 "Segoe UI", system-ui, sans-serif;
+    background:
+      radial-gradient(900px 600px at 8% -10%, rgba(var(--steel-light-rgb), .85), transparent 60%),
+      radial-gradient(700px 500px at 95% 10%, rgba(var(--glow-rgb), .13), transparent 60%),
+      radial-gradient(800px 600px at 60% 110%, rgba(var(--steel-rgb), .9), transparent 60%),
+      var(--navy-deep);
+    background-attachment: fixed;
+  }
+  header, details.group, .panel, .stat, .seg {
+    background: var(--glass); border: 1px solid var(--glass-border);
+    box-shadow: var(--shadow), inset 0 1px 0 var(--glass-highlight);
+    -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur);
+  }
+  @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    header, details.group, .panel, .stat, .seg { background: var(--glass-strong); }
+  }
+  main { flex: 1 0 auto; }
+  footer { margin-top: auto; padding: 18px 24px; text-align: center; font-size: 12px; color: var(--muted); }
+  footer b { font-weight: 600; color: var(--text); }
+  header { margin: 16px 24px 0; padding: 16px 20px; border-radius: 18px; position: relative; z-index: 10; }   /* above main so the account menu isn't covered */
+  h1 { margin: 0; font-size: 18px; color: var(--accent); letter-spacing: .3px; }
+  .topbar { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 24px; margin-bottom: 14px; }
+  .user { margin-left: auto; position: relative; }
+  .avatar {
+    display: inline-flex; align-items: center; justify-content: center; flex: none;
+    width: 36px; height: 36px; padding: 0; border-radius: 50%; font-size: 16px; font-weight: 700; line-height: 1;
+    background: var(--accent); color: var(--navy); user-select: none;
+  }
+  button.avatar { border: 2px solid rgba(255, 255, 255, .25); cursor: pointer; }
+  button.avatar:hover:not(:disabled), button.avatar[aria-expanded="true"] { transform: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(var(--accent-rgb), .25); }
+  .avatar.big { width: 72px; height: 72px; font-size: 32px; }
+  .usermenu {
+    position: absolute; right: 0; top: calc(100% + 8px); z-index: 20; min-width: 220px; padding: 6px; border-radius: 14px;
+    background: rgba(var(--navy-rgb), .96); border: 1px solid var(--glass-border);
+    box-shadow: 0 16px 40px rgba(0, 0, 0, .5), inset 0 1px 0 var(--glass-highlight);
+  }
+  .usermenu[hidden] { display: none; }
+  .usermenu button[hidden] { display: none; }
+  .usermenu .who { padding: 8px 12px 10px; margin-bottom: 4px; border-bottom: 1px solid var(--glass-border); color: var(--muted); font-size: 12px; }
+  .usermenu .who b { display: block; color: var(--text); font-size: 14px; font-weight: 600; overflow-wrap: anywhere; }
+  .usermenu button {
+    display: block; width: 100%; text-align: left; padding: 8px 12px; border-radius: 8px; font-weight: 400;
+    background: none; color: var(--text); border: 0; box-shadow: none;
+  }
+  .usermenu button:hover:not(:disabled) { transform: none; box-shadow: none; background: rgba(255, 255, 255, .08); color: var(--text); }
+  .profile { display: flex; flex-wrap: wrap; align-items: center; gap: 16px 20px; padding-bottom: 14px; }
+  .profile h2 { margin: 0 0 4px; font-size: 20px; color: var(--accent); overflow-wrap: anywhere; }
+  .profiledl { display: grid; grid-template-columns: max-content 1fr; gap: 8px 24px; margin: 0 0 12px; }
+  .profiledl dt { color: var(--muted); }
+  .profiledl dd { margin: 0; overflow-wrap: anywhere; }
+  .tzbox { margin: 0 0 16px; padding-top: 14px; border-top: 1px solid var(--glass-border); }
+  .pwsection { padding-top: 14px; border-top: 1px solid var(--glass-border); }
+  .tzrow { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px 12px; }
+  .tzrow .field { flex: 0 1 360px; margin: 0; }
+  .tzrow .dim { align-self: center; }
+  .tzbox .field { max-width: 360px; }
+  .tzbox select { width: 100%; }
+  .clocks { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 12px; }
+  .clock { display: flex; flex-direction: column; gap: 2px; min-width: 220px; padding: 10px 14px; border-radius: 12px; background: rgba(var(--ink-rgb), .3); border: 1px solid var(--glass-border); }
+  .clock .clab { font-size: 11px; text-transform: uppercase; letter-spacing: .6px; color: var(--muted); }
+  .clock b { font-size: 16px; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--accent); }
+  .clock .dim { font-size: 12px; }
+  .pwbox { display: flex; align-items: center; gap: 10px; margin: 0 0 12px; padding: 10px 12px; border-radius: 10px;
+           background: rgba(var(--deep-rgb), .55); border: 1px solid var(--glass-border); }
+  .pwbox code { flex: 1; min-width: 0; font: 15px/1.3 Consolas, "Cascadia Mono", monospace; letter-spacing: .4px; overflow-wrap: anywhere; user-select: all; }
+  main { padding: 8px 24px 48px; }
+
+  .toolbar { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; }
+  .field { display: flex; flex-direction: column; gap: 4px; }
+  .field label { font-size: 11px; text-transform: uppercase; letter-spacing: .6px; color: var(--muted); }
+  select, input[type=search], input[type=number] {
+    background: rgba(var(--deep-rgb), .45); color: var(--text); border: 1px solid var(--glass-border);
+    border-radius: 10px; padding: 8px 12px; min-width: 200px; font: inherit;
+    transition: border-color .15s, background .15s;
+  }
+  select:hover, input[type=search]:hover, input[type=number]:hover { border-color: rgba(var(--accent-rgb), .45); }
+  select option { background: var(--navy); color: var(--text); }
+  select:focus, input:focus, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  button {
+    background: var(--accent); color: var(--navy); border: 0; border-radius: 10px;
+    padding: 8px 18px; font: inherit; font-weight: 600; cursor: pointer;
+    box-shadow: 0 4px 14px rgba(var(--accent-rgb), .22), inset 0 1px 0 rgba(255, 255, 255, .45);
+    transition: transform .12s, box-shadow .12s, background .12s;
+  }
+  button:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 6px 18px rgba(var(--accent-rgb), .32), inset 0 1px 0 rgba(255, 255, 255, .45); }
+  button:active:not(:disabled) { transform: translateY(0); }
+  button.secondary {
+    background: rgba(var(--accent-rgb), .06); color: var(--accent); border: 1px solid rgba(var(--accent-rgb), .55);
+    box-shadow: none;
+  }
+  button.secondary:hover:not(:disabled) { background: rgba(var(--accent-rgb), .16); box-shadow: none; }
+  button:disabled { opacity: .45; cursor: default; }
+
+  .seg { display: inline-flex; padding: 3px; gap: 2px; border-radius: 12px; box-shadow: none; }
+  .seg button { background: transparent; color: var(--text); border-radius: 9px; font-weight: 400; padding: 6px 14px; box-shadow: none; }
+  .seg button:hover:not(:disabled) { transform: none; box-shadow: none; background: rgba(255, 255, 255, .07); }
+  .seg button.active { background: rgba(var(--accent-rgb), .16); color: var(--accent); font-weight: 600; box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), .35); }
+
+  .scaninfo { margin-top: 12px; display: flex; flex-wrap: wrap; gap: 4px 28px; color: var(--muted); font-size: 13px; }
+  .scaninfo b { color: var(--text); font-weight: 600; }
+  #status { margin: 16px 0 0; padding: 10px 14px; border-radius: 10px; background: rgba(255, 255, 255, .08); border: 1px solid var(--glass-border); display: none; }
+  #status.error { background: rgba(217, 83, 79, .18); border: 1px solid rgba(217, 83, 79, .6); }
+  #status.visible { display: block; }
+
+  .summary { display: flex; flex-wrap: wrap; gap: 12px; margin: 20px 0 8px; }
+  .stat { border-radius: var(--radius); padding: 12px 18px; min-width: 130px; }
+  .stat .v { font-size: 22px; font-weight: 600; color: var(--accent); }
+  .stat .l { font-size: 11px; text-transform: uppercase; letter-spacing: .6px; color: var(--muted); }
+
+  .controls { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-end; margin: 16px 0; }
+
+  details.group { border-radius: var(--radius); margin-bottom: 14px; overflow: hidden; }
+  details.group > summary {
+    cursor: pointer; padding: 12px 16px; display: flex; gap: 12px; align-items: baseline;
+    list-style: none; user-select: none;
+  }
+  details.group > summary::-webkit-details-marker { display: none; }
+  details.group > summary::before { content: "\25B8"; color: var(--accent); }
+  details.group[open] > summary::before { content: "\25BE"; }
+  .gname { font-weight: 600; color: var(--accent); }
+  .gmeta { color: var(--muted); font-size: 12px; }
+  .gnote { color: var(--muted); font-size: 12px; margin-left: auto; }
+
+  .scroll { overflow-x: auto; }
+  .panel { border-radius: var(--radius); overflow: hidden; }   /* card around the Rules and History tables */
+  table { border-collapse: collapse; width: 100%; }
+  th, td { padding: 8px 14px; text-align: left; white-space: nowrap; border-top: 1px solid rgba(255, 255, 255, .08); }
+  th {
+    font-size: 11px; text-transform: uppercase; letter-spacing: .5px; color: var(--muted);
+    background: rgba(var(--deep-rgb), .55); cursor: pointer; user-select: none; position: sticky; top: 0;
+  }
+  th.sorted { color: var(--accent); }
+  tr.filters th { position: static; cursor: default; padding: 6px 8px; border-top: 0; font-weight: normal; text-transform: none; letter-spacing: 0; vertical-align: top; }
+  tr.filters th:first-child { padding-left: 14px; }
+  tr.filters input, tr.filters select { width: 100%; min-width: 90px; padding: 4px 8px; font-size: 13px; border-radius: 8px; box-sizing: border-box; }
+  button.rangebtn {
+    width: 100%; min-width: 150px; display: block; text-align: left; padding: 4px 8px; font-size: 13px; font-weight: normal; border-radius: 8px; box-shadow: none;
+    background: rgba(var(--deep-rgb), .45); color: var(--muted); border: 1px solid var(--glass-border);
+  }
+  button.rangebtn:hover:not(:disabled) { transform: none; box-shadow: none; border-color: rgba(var(--accent-rgb), .45); }
+  button.rangebtn[aria-expanded="true"] { outline: 2px solid var(--accent); outline-offset: 1px; }     /* looks focused while the popup is open */
+  .rangepop input:hover { border-color: rgba(var(--accent-rgb), .45); }
+  button.rangebtn.on { color: var(--accent); border-color: rgba(var(--accent-rgb), .6); }
+  .rangepop {
+    position: fixed; z-index: 30; padding: 14px; border-radius: 14px; background: var(--navy); border: 1px solid var(--glass-border);
+    box-shadow: 0 18px 40px rgba(0, 0, 0, .45); display: flex; flex-direction: column; gap: 12px;
+  }
+  .rangepop h4 { margin: 0; font-size: 12px; text-transform: uppercase; letter-spacing: .6px; color: var(--muted); }
+  .rangepop .rangerow { display: flex; gap: 12px; }
+  .rangepop label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
+  .rangepop input {
+    width: 150px; box-sizing: border-box; color-scheme: dark; background: rgba(var(--deep-rgb), .45); color: var(--text);
+    border: 1px solid var(--glass-border); border-radius: 8px; padding: 6px 8px; font: inherit; font-size: 13px;
+  }
+  .rangepop button.mini:hover:not(:disabled) { box-shadow: none; }
+  .rangepop .rangebar { display: flex; justify-content: space-between; gap: 8px; }
+  tr.filters .clear { display: flex; align-items: center; justify-content: center; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  td.cols { white-space: normal; min-width: 220px; max-width: 420px; color: var(--muted); font-size: 12px; }
+  td.cols b { color: var(--text); font-weight: 500; }
+  /* names wrap (tags drop to the next line) so the table fits a 1080p screen */
+  td.name { white-space: normal; overflow-wrap: anywhere; min-width: 150px; max-width: 320px; }
+  #groups th, #groups td { padding: 8px 10px; }
+  #groups td.cols { min-width: 180px; max-width: 360px; }
+  #groups td.name .tag { margin: 2px 0 0 4px; }
+  tr:hover td { background: rgba(255, 255, 255, .06); }
+
+  .tag { display: inline-block; font-size: 10px; font-weight: 700; padding: 1px 7px; border-radius: 999px; margin-left: 6px;
+         background: rgba(255, 255, 255, .16); color: var(--text); letter-spacing: .4px; }
+  .tag.pk { background: var(--accent); color: var(--navy); }
+  .tag.off { background: var(--bad); color: #fff; }
+  .frag-ok { color: var(--ok); } .frag-reorg { color: var(--warn); } .frag-rebuild { color: var(--bad); font-weight: 600; }
+  .dim { color: var(--muted); }
+  .st-success { color: var(--ok); } .st-failed { color: var(--bad); font-weight: 600; }
+  .st-running { color: var(--accent); } .st-interrupted { color: var(--warn); } .st-queued { color: var(--warn); font-weight: 600; }
+  .st-partial, .st-stopped { color: var(--warn); font-weight: 600; } .st-skipped, .st-pending { color: var(--muted); }
+  td.err { white-space: normal; max-width: 360px; color: var(--bad); font-size: 12px; }
+  /* history lists show only the first line; the details popup has the rest */
+  .firstline { display: block; max-width: 340px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #detailDialog { width: min(720px, calc(100vw - 32px)); }
+  #detailDialog .facts, #runDialog .facts { display: grid; grid-template-columns: max-content 1fr; gap: 6px 18px; margin: 0 0 16px; font-size: 14px; }
+  #detailDialog .facts dt, #runDialog .facts dt { color: var(--muted); }
+  #detailDialog .facts dd, #runDialog .facts dd { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+  #runDialog h3 { margin: 0 0 6px; }
+  #runDialog .actions { margin-top: 16px; }
+  #runDialog pre.full { margin: 0 0 16px; padding: 10px 12px; max-height: 280px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere;
+    font: 12px/1.5 Consolas, ui-monospace, monospace; border-radius: 10px; background: rgba(var(--ink-rgb), .45); border: 1px solid var(--glass-border); }
+  #runDialog pre.full.bad { color: var(--bad); border-color: rgba(217, 83, 79, .5); }
+  #detailDialog h3 { margin: 0 0 6px; }
+  #detailDialog pre.full { margin: 0 0 16px; padding: 10px 12px; max-height: 280px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere;
+    font: 12px/1.5 Consolas, ui-monospace, monospace; border-radius: 10px; background: rgba(var(--ink-rgb), .45); border: 1px solid var(--glass-border); }
+  #detailDialog pre.full.bad { color: var(--bad); border-color: rgba(217, 83, 79, .5); }
+  .pager { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; padding: 10px 14px; border-top: 1px solid var(--glass-border); color: var(--muted); font-size: 13px; }
+  .pager .size { display: flex; align-items: center; gap: 8px; }
+  .pager select { min-width: 0; width: auto; padding: 4px 8px; }
+  .pager .pages { display: flex; align-items: center; gap: 8px; }
+  .historybar { display: flex; align-items: center; justify-content: flex-end; gap: 16px; margin-bottom: 16px; color: var(--muted); }
+  #historyTable th, #rulesTable th { cursor: default; position: static; }
+  .empty { text-align: center; color: var(--muted); padding: 48px 0; }
+
+  th.actions { cursor: default; }
+  td.actions { text-align: left; }
+  .dlg th.actions, .dlg td.actions { display: table-cell; }          /* keep .dlg .actions from turning table cells into flex boxes */
+  button.mini { padding: 2px 10px; font-size: 12px; border-radius: 8px; box-shadow: none; }
+  button.mini:hover:not(:disabled) { transform: none; }
+  /* icon-only buttons; the tooltip is right-aligned above the button so it can't widen the table */
+  button.iconbtn { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 28px; padding: 0; }
+  .iconbtn svg, .cficon svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  .iconbtn::after {
+    content: attr(data-tip); position: absolute; right: 0; bottom: calc(100% + 6px); z-index: 5; white-space: nowrap; pointer-events: none;
+    padding: 4px 10px; border-radius: 8px; font-size: 12px; font-weight: 400; color: var(--text);
+    background: var(--navy-deep); border: 1px solid var(--glass-border); box-shadow: 0 6px 18px rgba(0, 0, 0, .45);
+    opacity: 0; transform: translateY(2px); transition: opacity .12s, transform .12s;
+  }
+  .iconbtn:hover::after, .iconbtn:focus-visible::after { opacity: 1; transform: none; }
+  /* dim the icon, not the button: opacity would also fade the tooltip that says why it is disabled */
+  button.iconbtn.mini:disabled { opacity: 1; background: transparent; border-color: rgba(255, 255, 255, .14); color: var(--text); }
+  button.iconbtn.mini:disabled svg { opacity: .4; }
+  .cfhead { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
+  .cfhead h2 { margin: 0; }
+  .cficon { flex: none; display: grid; place-items: center; width: 36px; height: 36px; border-radius: 50%; color: var(--accent);
+            background: rgba(var(--accent-rgb), .10); border: 1px solid rgba(var(--accent-rgb), .45); }
+  .cficon svg { width: 18px; height: 18px; }
+  .cficon.danger { color: #ff9b97; background: rgba(217, 83, 79, .12); border-color: rgba(217, 83, 79, .6); }
+  #confirmDialog { width: min(480px, calc(100vw - 32px)); }
+  #confirmDialog .target { margin: 0 0 20px; color: var(--text); }
+  #confirmDialog .actions button { display: inline-flex; align-items: center; gap: 8px; }
+  #confirmDialog .actions svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  #confirmDialog button.danger { background: var(--bad); color: #fff; box-shadow: none; }
+  #confirmDialog button.danger:hover:not(:disabled) { background: #e2635f; box-shadow: none; transform: none; }
+
+  dialog {
+    width: min(620px, calc(100vw - 32px)); max-height: calc(100vh - 32px); overflow-y: auto; padding: 0; border-radius: 20px; color: var(--text);
+    background: rgba(var(--navy-rgb), .78); border: 1px solid var(--glass-border);
+    box-shadow: 0 24px 64px rgba(0, 0, 0, .5), inset 0 1px 0 var(--glass-highlight);
+    -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur);
+  }
+  dialog::backdrop { background: rgba(var(--ink-rgb), .55); -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px); }
+  .dlg { padding: 26px 28px 22px; }
+  .dlg h2 { margin: 0 0 4px; font-size: 18px; color: var(--accent); }
+  .dlg .target { margin: 0 0 16px; color: var(--muted); word-break: break-word; }
+  .dlg .target b { color: var(--text); font-weight: 600; }
+  .dlg .facts { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+  .dlg .fact { background: rgba(255, 255, 255, .07); border: 1px solid var(--glass-border); border-radius: 10px; padding: 6px 12px; }
+  .dlg .fact .l { display: block; font-size: 10px; text-transform: uppercase; letter-spacing: .6px; color: var(--muted); }
+  .dlg h3 { margin: 0 0 6px; font-size: 12px; text-transform: uppercase; letter-spacing: .6px; color: var(--muted); }
+  .dlg ul { margin: 0 0 16px; padding-left: 18px; }
+  .dlg li { margin-bottom: 6px; }
+  .dlg .note { margin: 0 0 16px; padding: 9px 12px; border-radius: 10px; background: rgba(232, 178, 74, .14); border: 1px solid rgba(232, 178, 74, .5); }
+  .dlg .result { margin: 0 0 16px; padding: 9px 12px; border-radius: 10px; background: rgba(108, 191, 132, .14); border: 1px solid rgba(108, 191, 132, .5); }
+  .dlg .result.error { background: rgba(217, 83, 79, .18); border-color: rgba(217, 83, 79, .6); }
+  .dupreport { margin: 4px 0 16px; display: grid; gap: 8px; max-height: 300px; overflow-y: auto; }
+  .dupsum { margin: 0; color: var(--muted); } .dupsum b { color: var(--text); }
+  .dupnote { display: flex; gap: 10px; align-items: flex-start; padding: 8px 12px; border-radius: 10px; font-size: 13px; overflow-wrap: anywhere;
+    background: rgba(232, 178, 74, .14); border: 1px solid rgba(232, 178, 74, .5); }
+  .dupnote svg { flex: none; width: 18px; height: 18px; margin-top: 1px; color: var(--warn); fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  .dupnote.error { background: rgba(217, 83, 79, .18); border-color: rgba(217, 83, 79, .6); } .dupnote.error svg { color: var(--bad); }
+  .dupnote.ok { background: rgba(108, 191, 132, .14); border-color: rgba(108, 191, 132, .5); } .dupnote.ok svg { color: var(--ok); }
+  #dupManualField .check { display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 14px; text-transform: none; letter-spacing: 0; color: var(--text); }
+  #dupManualField .check input { width: 16px; height: 16px; accent-color: var(--accent); }
+  .opts { margin-bottom: 14px; }
+  .optgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; align-items: end; }
+  .optgrid select, .optgrid input[type=number] { width: 100%; min-width: 0; }
+  .optgrid .check { display: flex; align-items: center; gap: 8px; padding: 9px 0; cursor: pointer; }
+  .optgrid .check input { width: 16px; height: 16px; accent-color: var(--accent); }
+  .dlg pre.sql {
+    margin: 12px 0 0; padding: 10px 12px; border-radius: 10px; white-space: pre-wrap; word-break: break-word;
+    background: rgba(var(--ink-rgb), .55); border: 1px solid var(--glass-border); color: var(--accent);
+    font: 12px/1.5 Consolas, "Cascadia Mono", monospace;
+  }
+  .dlg .invalid { color: #ff9b97; font-size: 12px; margin-top: 4px; }
+  .sub { display: block; color: var(--muted); font-size: 11px; max-width: 360px; white-space: normal; }
+  .dlg .actions { display: flex; justify-content: flex-end; gap: 10px; }
+
+  /* settings */
+  .setsec {
+    margin-bottom: 20px; padding: 16px 20px 8px; border-radius: 18px;
+    background: var(--glass); border: 1px solid var(--glass-border);
+    box-shadow: var(--shadow), inset 0 1px 0 var(--glass-highlight);
+    -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur);
+  }
+  @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) { .setsec { background: var(--glass-strong); } }
+  .sethead { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 8px 16px; margin-bottom: 10px; }
+  .sethead h2 { margin: 0 0 2px; font-size: 16px; color: var(--accent); }
+  .sethead .hint { margin: 0; max-width: 760px; }
+  .setsec th { cursor: default; position: static; }
+  .setsec td.wrap { white-space: normal; max-width: 420px; font-size: 12px; }
+  .setsec .empty { padding: 24px 0 28px; }
+  .setsec .warnline { color: var(--warn); margin: 0 0 10px; font-size: 13px; }
+  .pagetitle { margin: 0 0 2px; font-size: 18px; color: var(--accent); }
+  .setbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; margin-bottom: 16px; }
+  .setbar .hint { margin: 0; max-width: 760px; }
+  #catalogBody td.wrap { white-space: normal; min-width: 160px; max-width: 420px; overflow-wrap: anywhere; }
+  .envchips { display: flex; flex-wrap: wrap; gap: 4px; }
+  .envchips span { font-size: 12px; padding: 1px 9px; border-radius: 999px; background: rgba(255, 255, 255, .1); border: 1px solid var(--glass-border); }
+  .setbar > button, .subhead > button { margin-left: auto; }   /* stay right-aligned when the text wraps above */
+  .subsec { margin-bottom: 14px; }
+  .subhead { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 6px 16px; margin: 6px 0 8px; }
+  .subhead h3 { margin: 0; font-size: 12px; text-transform: uppercase; letter-spacing: .6px; color: var(--muted); }
+  .subhead .hint { margin: 0; }
+  .setsec .sethead { padding-bottom: 8px; border-bottom: 1px solid var(--glass-border); }
+  /* environment card: the header is the summary */
+  details.setsec > summary.sethead { cursor: pointer; list-style: none; user-select: none; }
+  details.setsec > summary.sethead::-webkit-details-marker { display: none; }
+  details.setsec > summary.sethead h2::before { content: "▸"; margin-right: 10px; }
+  details.setsec[open] > summary.sethead h2::before { content: "▾"; }
+  details.setsec:not([open]) { padding-bottom: 14px; }
+  details.setsec:not([open]) > summary.sethead { margin-bottom: 0; padding-bottom: 0; border-bottom: 0; }
+  details.setsec > summary.sethead .hint { padding-left: 24px; }
+  .fgrid { display: grid; gap: 14px; margin-bottom: 16px; }
+  .fgrid select, .fgrid input { width: 100%; min-width: 0; }
+  .fgrid .hint { margin: 2px 0 0; }
+  .field .seg { align-self: flex-start; }
+
+  /* rules */
+  dialog.wide { width: min(940px, calc(100vw - 32px)); }
+  .rulesbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 12px 16px; margin-bottom: 16px; color: var(--muted); }
+  .rulegroup { margin-bottom: 22px; }
+  .rulegroup > summary.sethead { cursor: pointer; list-style: none; user-select: none; }
+  .rulegroup > summary.sethead::-webkit-details-marker { display: none; }
+  .rulegroup > summary.sethead h2 { font-size: 16px; color: var(--accent); margin: 0 0 2px; }
+  .rulegroup > summary.sethead h2::before { content: "▾"; margin-right: 10px; }
+  .rulegroup:not([open]) > summary.sethead h2::before { content: "▸"; }
+  .rulegroup > summary.sethead .hint { padding-left: 24px; }
+  td.prio, th.prio { width: 1%; white-space: nowrap; }
+  .prio .grip { display: inline-block; width: 18px; margin-right: 6px; text-align: center; color: var(--muted); cursor: grab; user-select: none; letter-spacing: -2px; }
+  .prio .grip:hover { color: var(--text); }
+  .prio .grip:active { cursor: grabbing; }
+  tr.dragging { opacity: .45; }
+  tr.drop-before > td { box-shadow: inset 0 3px 0 var(--accent); }
+  tr.drop-after > td { box-shadow: inset 0 -3px 0 var(--accent); }
+  #rulesTable td { vertical-align: top; }
+  #rulesTable td.wrap { white-space: normal; min-width: 180px; max-width: 320px; }
+  .rowbtns { display: flex; flex-wrap: wrap; gap: 6px; }
+  .fragbox { display: flex; flex-direction: column; gap: 2px; max-width: 320px; }
+  .fragbox .field { transition: opacity .15s; }
+  .fragbox .field.off { opacity: .4; }
+  .fragbox input:disabled { cursor: not-allowed; background: rgba(255, 255, 255, .04); }
+  button.mini.danger { color: #ff9b97; border-color: rgba(217, 83, 79, .6); background: rgba(217, 83, 79, .08); }
+  .rsec { margin: 0 0 18px; }
+  .rsec h3 { margin: 0 0 8px; }
+  .rgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; align-items: end; }
+  .rgrid select, .rgrid input[type=number], .rgrid input[type=text], .rgrid input[type=time], .dlg input[type=text], .dlg input[type=time] { width: 100%; min-width: 0; }
+  input[type=text], input[type=time], input[type=password] {
+    background: rgba(var(--deep-rgb), .45); color: var(--text); border: 1px solid var(--glass-border);
+    border-radius: 10px; padding: 8px 12px; font: inherit;
+  }
+  input[type=time] { color-scheme: dark; }
+  .check { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+  .rgrid .check { padding: 9px 0; }
+  .check input { width: 16px; height: 16px; accent-color: var(--accent); }
+  .hint { color: var(--muted); font-size: 12px; margin: 6px 0 0; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chips button { padding: 5px 12px; font-weight: 500; background: rgba(255, 255, 255, .06); color: var(--text); border: 1px solid var(--glass-border); box-shadow: none; }
+  .chips button.on { background: rgba(var(--accent-rgb), .2); color: var(--accent); border-color: rgba(var(--accent-rgb), .6); }
+  .picker { border: 1px solid var(--glass-border); border-radius: 12px; background: rgba(var(--ink-rgb), .35); }
+  .pickbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 10px 12px; border-bottom: 1px solid var(--glass-border); }
+  .pickbar input[type=search] { min-width: 180px; flex: 1 1 200px; }
+  .pickbar .count { margin-left: auto; color: var(--muted); font-size: 13px; }
+  .picklist { max-height: 300px; overflow-y: auto; padding: 4px 0; color-scheme: dark; }
+  dialog { color-scheme: dark; }
+  .ptable { display: flex; align-items: center; gap: 8px; padding: 6px 12px; background: rgba(255, 255, 255, .05); cursor: pointer; position: sticky; top: 0; }
+  .prow { display: flex; align-items: center; gap: 10px; padding: 3px 12px 3px 34px; cursor: pointer; }
+  .prow:hover { background: rgba(255, 255, 255, .06); }
+  .prow.dis { opacity: .5; cursor: default; }
+  .prow .nm { flex: 1 1 auto; word-break: break-all; }
+  .prow .fr { min-width: 78px; text-align: right; font-variant-numeric: tabular-nums; font-size: 12px; }
+  .ptable input, .prow input { accent-color: var(--accent); }
+  .picknote { padding: 18px 12px; color: var(--muted); text-align: center; }
+  .picknote.warn { padding: 8px 12px; text-align: left; font-size: 12px; border-bottom: 1px solid var(--glass-border); }
+  .picklist.dblist { max-height: 170px; }
+  .prow.dbrow { padding-left: 12px; }
+  .where .cols2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  @media (max-width: 700px) { .where .cols2 { grid-template-columns: 1fr; } }
+  .where .wbox { border: 1px solid var(--glass-border); border-radius: 12px; background: rgba(var(--ink-rgb), .35); min-width: 0; }
+  .where .wbox h3 { margin: 0; padding: 10px 12px; border-bottom: 1px solid var(--glass-border); display: flex; justify-content: space-between; gap: 8px; }
+  .where .wlist { max-height: 320px; overflow-y: auto; padding: 4px 0; color-scheme: dark; }
+  .where .wrow { display: flex; align-items: center; gap: 8px; padding: 4px 12px; }
+  .where .wrow .nm { flex: 1 1 auto; word-break: break-all; }
+  .where .wrow .meta { color: var(--muted); font-size: 12px; white-space: nowrap; }
+  .where .yes .n { color: #7bd88f; }
+  .where .no .n { color: #ff9b97; }
+  .where .unk { margin-top: 12px; }
+  .where .actions { margin-top: 18px; }
+  .where .unk summary { cursor: pointer; color: var(--muted); }
+  .where .unk .wlist { max-height: 160px; }
+  .runs table.inner th { cursor: default; position: static; }
+  .runs tr.run { cursor: pointer; }
+  .runs td.msg { white-space: normal; max-width: 320px; font-size: 12px; color: var(--muted); }
+</style>
+</head>
+<body>
+<header>
+  <div class="topbar">
+    <h1>SQL Index Manager</h1>
+    <div class="seg" id="nav">
+      <button data-view="indexes" class="active">Indexes</button>
+      <button data-view="rules">Rules</button>
+      <button data-view="history">History</button>
+    </div>
+    <div class="user">
+      <button id="avatar" class="avatar" aria-haspopup="menu" aria-expanded="false" aria-label="Account menu" title="Account"></button>
+      <div id="userMenu" class="usermenu" role="menu" hidden>
+        <div class="who">Signed in as<b id="whoName"></b></div>
+        <button id="menuProfile" role="menuitem">My profile</button>
+        <button id="menuEnvironments" role="menuitem" hidden>Environments</button>
+        <button id="menuDatabases" role="menuitem" hidden>Databases</button>
+        <button id="menuMachines" role="menuitem" hidden>Machines</button>
+        <button id="menuUsers" role="menuitem" hidden>Users</button>
+        <button id="logout" role="menuitem">Sign out</button>
+      </div>
+    </div>
+  </div>
+  <div id="indexesBar">
+  <div class="toolbar">
+    <div class="field"><label for="environment">Environment</label><select id="environment"></select></div>
+    <div class="field"><label for="database">Database</label><select id="database"></select></div>
+    <button id="scanIndexes" title="Reads the index definitions, sizes and usage from the database and stores them for everyone">Scan indexes</button>
+    <button id="scanFrag" class="secondary" title="Reads fragmentation of every index in the database — can take a while on large databases">Scan fragmentation</button>
+  </div>
+  <div id="scaninfo" class="scaninfo"></div>
+  </div>
+  <div id="status" role="status"></div>
+</header>
+
+<main>
+  <section id="rulesView" hidden>
+    <div class="rulesbar">
+      <button id="newRule">New rule</button>
+      <button id="refreshRules" class="secondary">Refresh</button>
+    </div>
+    <div id="rulesBody"></div>
+  </section>
+
+  <section id="machinesView" hidden>
+    <div class="setbar">
+      <div><h2 class="pagetitle">Machines</h2><p class="hint">Where the environments run. An environment is on one machine, and a machine can have several environments. Add a machine here before adding an environment.</p></div>
+      <button id="addMachine">Add machine</button>
+    </div>
+    <div id="machinesBody"></div>
+  </section>
+
+  <section id="settingsView" hidden>
+    <div id="settingsBody"></div>
+  </section>
+
+  <section id="databasesView" hidden>
+    <div class="setbar">
+      <div><h2 class="pagetitle">Databases</h2><p class="hint">Every database the environments can use, and where it is used. Add one here, or pick it from what an account can see: a database that is not in this list yet is created when you add it to an environment.</p></div>
+      <button id="addCatalog">Add database</button>
+    </div>
+    <div id="catalogBody"></div>
+  </section>
+
+  <section id="usersView" hidden>
+    <div class="setbar">
+      <div><h2 class="pagetitle">Users</h2><p class="hint">Everyone who can sign in. A new user gets a password made for them and has to replace it the first time they sign in.</p></div>
+      <button id="addUser">Add user</button>
+    </div>
+    <div id="usersBody"></div>
+  </section>
+
+  <section id="profileView" hidden>
+    <div class="setsec">
+      <div class="sethead"><div><h2>My profile</h2></div></div>
+      <div class="profile">
+        <span id="profileAvatar" class="avatar big" aria-hidden="true"></span>
+        <div><h2 id="profileName"></h2><span class="tag" id="profileRole"></span></div>
+      </div>
+      <dl class="profiledl">
+        <dt>Username</dt><dd id="profileUser"></dd>
+        <dt>Role</dt><dd id="profileRoleText"></dd>
+        <dt>Account created</dt><dd id="profileCreated"></dd>
+      </dl>
+      <div class="tzbox">
+        <div class="tzrow">
+          <div class="field"><label for="profileTz">My time zone</label><select id="profileTz"></select></div>
+          <button id="saveTz" class="secondary" type="button" disabled>Save</button>
+          <span class="dim" id="tzStatus" role="status"></span>
+        </div>
+        <div class="clocks" aria-live="off">
+          <div class="clock"><span class="clab">My time</span><b id="clockMine">–</b><span class="dim" id="clockMineSub"></span></div>
+          <div class="clock"><span class="clab">Server time</span><b id="clockServer">–</b><span class="dim" id="clockServerSub"></span></div>
+        </div>
+        <p class="hint" id="tzMsg">Pick the IANA time zone you work in, then save it. Until you do, this browser's time zone is used. Dates in the lists stay in this browser's time zone.</p>
+      </div>
+      <div class="pwsection"><button id="changePassword" class="secondary">Change password</button></div>
+    </div>
+  </section>
+
+  <section id="historyView" hidden>
+    <div class="historybar"><button id="refreshHistory" class="secondary">Refresh</button></div>
+    <div id="historyBody"></div>
+    <div id="rangePop" class="rangepop" role="dialog" aria-labelledby="rangeTitle" hidden>
+      <h4 id="rangeTitle"></h4>
+      <div class="rangerow">
+        <label><span id="rangeFromLabel"></span><input id="rangeFrom"></label>
+        <label><span id="rangeToLabel"></span><input id="rangeTo"></label>
+      </div>
+      <div class="rangebar"><button type="button" class="mini secondary" id="rangeClear">Clear</button><button type="button" class="mini" id="rangeDone">Done</button></div>
+    </div>
+  </section>
+
+  <section id="indexesView">
+  <div id="summary" class="summary"></div>
+
+  <div id="controls" class="controls" hidden>
+    <div class="field">
+      <label>Group by</label>
+      <div class="seg" id="groupBy">
+        <button data-g="type" class="active">Index Type</button>
+        <button data-g="table">Table</button>
+        <button data-g="frag">Fragmentation</button>
+      </div>
+    </div>
+    <div class="field"><label for="filter">Filter</label><input id="filter" type="search" placeholder="table, index or column"></div>
+  </div>
+
+  <div id="groups"></div>
+  </section>
+</main>
+<footer><span>SQL Index Manager</span> <b id="appVersion"></b></footer>
+
+<dialog id="rebuildDialog" aria-labelledby="rbTitle">
+  <div class="dlg">
+    <h2 id="rbTitle">Rebuild this index?</h2>
+    <p class="target" id="rbTarget"></p>
+    <div id="rbFacts" class="facts"></div>
+    <div id="rbOptions" class="opts">
+      <h3>Options</h3>
+      <div class="optgrid">
+        <div class="field"><label for="rbMode">Mode</label>
+          <select id="rbMode"><option value="online">Online</option><option value="offline">Offline</option></select></div>
+        <div class="field"><label for="rbComp">Data compression</label><select id="rbComp"></select></div>
+        <div class="field"><label for="rbDop">MAXDOP (0 – 64)</label>
+          <input id="rbDop" type="number" min="0" max="64" step="1" value="0"></div>
+        <label class="check"><input id="rbTemp" type="checkbox"> Sort in tempdb</label>
+      </div>
+      <div id="rbInvalid" class="invalid" hidden></div>
+      <pre id="rbSql" class="sql"></pre>
+    </div>
+    <div id="rbExplain">
+      <h3>What this means</h3>
+      <ul id="rbPoints"></ul>
+    </div>
+    <div id="rbMsg" hidden></div>
+    <div class="actions">
+      <button id="rbCancel" class="secondary" type="button">Cancel</button>
+      <button id="rbGo" type="button">Rebuild index</button>
+    </div>
+  </div>
+</dialog>
+
+<dialog id="formDialog" aria-labelledby="formTitle">
+  <form class="dlg" id="formEl" novalidate>
+    <h2 id="formTitle"></h2>
+    <p class="target" id="formIntro"></p>
+    <div id="formFields" class="fgrid"></div>
+    <div id="formMsg" class="result error" hidden></div>
+    <div class="actions">
+      <button id="formCancel" class="secondary" type="button">Cancel</button>
+      <button id="formGo" type="submit">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="confirmDialog" aria-labelledby="cfTitle">
+  <form class="dlg" id="cfForm" method="dialog">
+    <div class="cfhead"><span class="cficon" id="cfIcon" aria-hidden="true"></span><h2 id="cfTitle"></h2></div>
+    <p class="target" id="cfText"></p>
+    <div class="actions">
+      <button id="cfCancel" class="secondary" type="button">Cancel</button>
+      <button id="cfOk" type="submit"></button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="newUserDialog" aria-labelledby="newUserTitle">
+  <div class="dlg">
+    <h2 id="newUserTitle"></h2>
+    <p class="target">Password for <b id="newUserName"></b></p>
+    <div class="pwbox"><code id="newUserPassword"></code><button id="copyPassword" class="secondary mini" type="button">Copy</button></div>
+    <p class="note">Copy this password and send it to the user. It is shown only now and can't be looked up later. They have to replace it the next time they sign in.</p>
+    <div class="actions"><button id="newUserDone" type="button">Done</button></div>
+  </div>
+</dialog>
+
+<dialog id="scanDialog" aria-labelledby="scanTitle">
+  <div class="dlg">
+    <h2 id="scanTitle">Databases of the account</h2>
+    <p class="target" id="scanIntro"></p>
+    <div id="scanMsg" class="result" hidden></div>
+    <div class="picker">
+      <div class="pickbar">
+        <input id="scanFilter" type="search" placeholder="Filter databases">
+        <button id="scanAll" class="mini secondary" type="button">Select shown</button>
+        <button id="scanNone" class="mini secondary" type="button">Clear</button>
+        <span class="count" id="scanCount"></span>
+      </div>
+      <div class="picklist" id="scanList"></div>
+    </div>
+    <div id="scanNotes"></div>
+    <p class="hint">Only the databases you add here, or by name, appear in the Indexes view and in the rules. Nothing is changed on the SQL Server.</p>
+    <div class="actions">
+      <button id="scanRescan" class="secondary" type="button">Scan again</button>
+      <button id="scanClose" class="secondary" type="button">Close</button>
+      <button id="scanAdd" type="button" disabled>Add selected</button>
+    </div>
+  </div>
+</dialog>
+
+<dialog id="ruleDialog" class="wide" aria-labelledby="ruleTitle">
+  <div class="dlg">
+    <h2 id="ruleTitle">New rule</h2>
+    <p class="target" id="ruleIntro"></p>
+
+    <div class="rsec">
+      <input type="hidden" id="ruleKind" value="rebuild">
+      <div class="seg" id="ruleKindSeg" role="group" aria-label="Rule type">
+        <button type="button" data-kind="rebuild" class="active" aria-pressed="true">Rebuild indexes</button>
+        <button type="button" data-kind="scan" aria-pressed="false">Scan only</button>
+      </div>
+    </div>
+
+    <div class="rsec rgrid">
+      <div class="field"><label for="ruleName">Name</label><input id="ruleName" type="text" maxlength="100" placeholder="e.g. Weekly rebuild" autocomplete="off"></div>
+      <div class="field"><label for="ruleEnvironment">Environment</label><select id="ruleEnvironment"></select></div>
+      <div class="field"><label for="rulePriority">Priority</label><input id="rulePriority" type="number" min="1" step="1" inputmode="numeric"></div>
+    </div>
+    <p class="hint" id="rulePriorityHint">Priority 1 goes first. A machine runs one rule at a time: when several are due together, or one is due while another runs, the one with the lowest number goes first and the others wait. You can also drag the rules on the Rules page.</p>
+
+    <div class="rsec">
+      <h3>Databases</h3>
+      <div class="picker">
+        <div class="pickbar">
+          <input id="dbFilter" type="search" placeholder="Filter databases">
+          <button id="dbAll" class="mini secondary" type="button">Select shown</button>
+          <button id="dbNone" class="mini secondary" type="button">Clear all</button>
+          <span class="count" id="dbCount"></span>
+        </div>
+        <div class="picklist dblist" id="dbList"></div>
+      </div>
+      <p class="hint" id="dbHint"></p>
+    </div>
+
+    <div class="rsec">
+      <h3>When</h3>
+      <div class="rgrid">
+        <div class="field"><label for="ruleSched">Schedule</label>
+          <select id="ruleSched"><option value="weekly">Weekly, on chosen days</option><option value="daily">Every day</option><option value="manual">Manual only</option></select></div>
+        <div class="field" id="ruleTimeField"><label for="ruleTime">Start time (hh:mm:ss)</label><input id="ruleTime" type="time" step="1" value="00:00:00"></div>
+        <div class="field" id="ruleTzField"><label for="ruleTz">Time zone</label><select id="ruleTz"></select></div>
+      </div>
+      <div class="chips" id="ruleDays" style="margin-top:10px"></div>
+      <p class="hint" id="ruleSchedText"></p>
+    </div>
+
+    <div class="rsec" data-rebuild>
+      <h3>Indexes to rebuild</h3>
+      <div class="picker">
+        <div class="pickbar">
+          <input id="pickFilter" type="search" placeholder="Filter by table or index">
+          <button id="pickAll" class="mini secondary" type="button">Select shown</button>
+          <button id="pickNone" class="mini secondary" type="button">Clear all</button>
+          <span class="count" id="pickCount"></span>
+        </div>
+        <div class="picklist" id="pickList"></div>
+      </div>
+      <p class="hint" id="pickHint">The list is every index found in the last stored scans of the selected databases; “in 2 of 3” says in how many of them it exists. Heaps have no index to rebuild and are not listed.</p>
+    </div>
+
+    <div class="rsec" data-rebuild>
+      <h3>Condition</h3>
+      <div class="fragbox">
+        <div class="field" id="ruleFragField"><label for="ruleFrag">Fragmentation (%)</label><input id="ruleFrag" type="number" min="0" max="100" step="0.1" value="30"></div>
+        <label class="check"><input id="ruleFragOn" type="checkbox"> Only rebuild when fragmentation is above</label>
+      </div>
+      <p class="hint" id="ruleFragHint"></p>
+    </div>
+
+    <div class="rsec" data-rebuild>
+      <h3>Rebuild options</h3>
+      <div class="rgrid">
+        <div class="field"><label for="ruleMode">Mode</label>
+          <select id="ruleMode"><option value="online">Online</option><option value="offline">Offline</option></select></div>
+        <div class="field"><label for="ruleComp">Data compression</label>
+          <select id="ruleComp"><option value="">Keep current</option><option value="NONE">None</option><option value="ROW">Row</option><option value="PAGE" selected>Page</option>
+            <option value="COLUMNSTORE">Columnstore</option><option value="COLUMNSTORE_ARCHIVE">Columnstore archive</option></select></div>
+        <div class="field"><label for="ruleDop">MAXDOP (0 – 64)</label><input id="ruleDop" type="number" min="0" max="64" step="1" value="0"></div>
+        <label class="check"><input id="ruleTemp" type="checkbox"> Sort in tempdb</label>
+      </div>
+      <p class="hint">One set of options for all the indexes. Where an option doesn't fit an index, it is adapted for that index: XML and spatial indexes are rebuilt offline, and a compression that doesn't fit the index type is replaced by the index's own.</p>
+    </div>
+
+    <div class="rsec" data-rebuild>
+      <h3>Execution</h3>
+      <div class="rgrid">
+        <div class="field"><label for="ruleExec">Order</label>
+          <select id="ruleExec"><option value="serial">One by one</option><option value="parallel">In parallel</option></select></div>
+        <div class="field" id="ruleParField"><label for="rulePar">At most at once (1 – 16)</label><input id="rulePar" type="number" min="1" max="16" step="1" value="4"></div>
+      </div>
+      <p class="hint" id="ruleExecHint"></p>
+    </div>
+
+    <div id="ruleMsg" class="result error" hidden></div>
+    <div class="actions">
+      <button id="ruleCancel" class="secondary" type="button">Cancel</button>
+      <button id="ruleSave" type="button">Save rule</button>
+    </div>
+  </div>
+</dialog>
+
+<dialog id="detailDialog" aria-labelledby="dtTitle">
+  <div class="dlg">
+    <div class="cfhead"><span class="cficon" id="dtIcon" aria-hidden="true"></span><h2 id="dtTitle"></h2></div>
+    <p class="target" id="dtSub"></p>
+    <dl class="facts" id="dtFacts"></dl>
+    <div id="dtFullBox" hidden><h3 id="dtFullLabel"></h3><pre class="full" id="dtFull"></pre></div>
+    <div class="actions"><button id="dtClose" class="secondary" type="button">Close</button></div>
+  </div>
+</dialog>
+
+<dialog id="runsDialog" class="wide" aria-labelledby="runsTitle">
+  <div class="dlg runs">
+    <h2 id="runsTitle">Rule history</h2>
+    <p class="target" id="runsSub"></p>
+    <div id="runsBody"></div>
+    <div class="actions"><button id="runsClose" class="secondary" type="button">Close</button></div>
+  </div>
+</dialog>
+
+<dialog id="runDialog" class="wide" aria-labelledby="rdTitle">
+  <div class="dlg runs">
+    <div class="cfhead"><span class="cficon" id="rdIcon" aria-hidden="true"></span><h2 id="rdTitle"></h2></div>
+    <p class="target" id="rdSub"></p>
+    <dl class="facts" id="rdFacts"></dl>
+    <div id="rdNoteBox" hidden><h3>Note</h3><pre class="full bad" id="rdNote"></pre></div>
+    <h3 id="rdItemsTitle"></h3>
+    <div class="scroll" id="rdItems"></div>
+    <div class="actions"><button id="rdClose" class="secondary" type="button">Close</button></div>
+  </div>
+</dialog>
+
+<dialog id="dupDialog" aria-labelledby="dupTitle">
+  <form class="dlg" id="dupForm" novalidate>
+    <h2 id="dupTitle">Duplicate rule</h2>
+    <p class="target" id="dupSub"></p>
+    <div class="fgrid">
+      <div class="field"><label for="dupEnv">Environment of the copy</label><select id="dupEnv"></select></div>
+      <div class="field"><label for="dupName">Name of the copy</label><input id="dupName" type="text" maxlength="100" autocomplete="off" spellcheck="false"></div>
+      <div class="field" id="dupManualField"><label class="check"><input type="checkbox" id="dupManual"> Don't schedule the copy, start it by hand</label>
+        <p class="hint" id="dupSchedText"></p></div>
+    </div>
+    <div id="dupReport" class="dupreport" aria-live="polite"></div>
+    <div id="dupMsg" class="result error" hidden></div>
+    <div class="actions">
+      <button id="dupCancel" class="secondary" type="button">Cancel</button>
+      <button id="dupGo" type="submit" disabled>Duplicate</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="whereDialog" class="wide where" aria-labelledby="whereTitle">
+  <div class="dlg">
+    <h2 id="whereTitle">Where is this index?</h2>
+    <p class="target" id="whereTarget"></p>
+    <div class="pickbar" style="border:0;padding:0 0 12px"><input id="whereFilter" type="search" placeholder="Filter databases"><span class="count" id="whereNote"></span></div>
+    <div id="whereBody"></div>
+    <div class="actions"><button id="whereClose" class="secondary" type="button">Close</button></div>
+  </div>
+</dialog>
+
+<script>
+"use strict";
+
+// Microsoft's guidance: under 5% leave alone, 5-30% reorganize, over 30% rebuild;
+// indexes under 1000 pages aren't worth maintaining.
+const FRAG_REORG = 5, FRAG_REBUILD = 30, MIN_PAGES = 1000;
+
+const TYPE_ORDER = ["CLUSTERED", "NONCLUSTERED", "HEAP", "CLUSTERED COLUMNSTORE", "NONCLUSTERED COLUMNSTORE", "XML", "SPATIAL"];
+const FRAG_ORDER = ["Rebuild (> 30%)", "Reorganize (5-30%)", "Healthy (< 5%)", "Too small (< 1000 pages)", "No data", "Not applicable", "Not scanned"];
+const FRAG_NOTES = {
+  "Too small (< 1000 pages)": "fragmentation is not meaningful at this size",
+  "No data": "disabled or empty indexes aren't reported by the scan",
+  "Not applicable": "columnstore indexes are maintained by row-group state, not fragmentation",
+  "Not scanned": "press Scan fragmentation to classify these",
+};
+
+const $ = id => document.getElementById(id);
+const ALL = "*";   // value of the "All databases" option
+const state = { empty: "", envs: [], all: false, scanned: 0, total: 0, data: null, frag: null, meta: { indexes: null, fragmentation: null }, database: "", groupBy: "type", sort: { key: "size_mb", dir: -1 }, filter: "", open: new Map() };
+
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const fmtInt = n => Number(n).toLocaleString();
+const fmtMb = mb => mb >= 1024 ? (mb / 1024).toFixed(2) + " GB" : Number(mb).toFixed(1) + " MB";
+const fmtDate = s => s ? s.replace("T", " ").slice(0, 16) : "never";
+// Timestamps are stored in UTC; show them in the viewer's zone with the age.
+function fmtWhen(iso) {
+  const d = new Date(iso), mins = Math.round((Date.now() - d) / 60000);
+  const ago = mins < 1 ? "just now" : mins < 60 ? mins + " min ago" : mins < 2880 ? Math.round(mins / 60) + " h ago" : Math.round(mins / 1440) + " days ago";
+  return d.toLocaleString([], { dateStyle: "medium", timeStyle: "short" }) + " (" + ago + ")";
+}
+const keyOf = ix => ix._key ?? ix.object_id + ":" + ix.index_id;
+
+// Icon buttons: an action's label is the tooltip; confirm and text feed the confirmation popup.
+const svg = paths => `<svg viewBox="0 0 24 24" aria-hidden="true">${paths}</svg>`;
+const SHIELD = '<path d="M12 3l8 3v6c0 4.5-3.2 8-8 9-4.8-1-8-4.5-8-9V6z"/>';
+const TRASH = svg('<path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/>');
+// attrs: already-escaped data-* attributes; subject: what the button acts on, for screen readers.
+const iconButton = (a, attrs, subject = "", { primary = false, disabled = false, tip = a.label } = {}) =>
+  `<button class="mini${primary ? "" : " secondary"} iconbtn${a.danger ? " danger" : ""}" ${attrs} data-tip="${esc(tip)}" aria-label="${esc(a.label + (subject ? ": " + subject : ""))}"${disabled ? " disabled" : ""}>${a.icon}</button>`;
+const userButton = (act, name) => iconButton(USER_ACTIONS[act], `data-act="${act}" data-name="${esc(name)}"`, name);
+const PLAY = svg('<path d="M7 4l13 8-13 8z"/>'), PENCIL = svg('<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5l4 4"/>');
+
+// Indexes page
+const INDEX_ACTIONS = {
+  rebuild: { label: "Rebuild index", icon: svg('<path d="M20 11a8 8 0 0 0-14.5-4M4 4v4h4"/><path d="M4 13a8 8 0 0 0 14.5 4M20 20v-4h-4"/>') },
+  where: { label: "Databases that have it", icon: svg('<ellipse cx="12" cy="6" rx="7" ry="3"/><path d="M5 6v6c0 1.7 3.1 3 7 3s7-1.3 7-3V6M5 12v6c0 1.7 3.1 3 7 3s7-1.3 7-3v-6"/>') },
+};
+// Rules page; run, stop and delete ask for confirmation
+const RULE_ACTIONS = {
+  run: { label: "Run now", confirm: "Run now", icon: PLAY },
+  stop: { label: "Stop run", confirm: "Stop run", danger: true, icon: svg('<rect x="6" y="6" width="12" height="12" rx="1.5"/>'),
+    text: n => `<b>${esc(n)}</b> is running. What it is doing right now is cancelled (an index being rebuilt is rolled back by SQL Server, so it stays as it was) and the rest is skipped. Cancelling can take a moment.` },
+  history: { label: "Run history", icon: svg('<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>') },
+  edit: { label: "Edit rule", icon: PENCIL },
+  unqueue: { label: "Don't wait any more", confirm: "Remove from queue", icon: svg('<path d="M6 6l12 12M18 6L6 18"/>') },
+  duplicate: { label: "Duplicate rule", icon: svg('<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h8"/>') },
+  delete: { label: "Delete rule", confirm: "Delete", danger: true, icon: TRASH,
+    text: n => `<b>${esc(n)}</b> and its whole history are deleted. This can't be undone.` },
+};
+
+const USER_ACTIONS = {
+  "make-admin": { label: "Make administrator", confirm: "Make administrator", icon: svg(SHIELD + '<path d="M9 12l2 2 4-4"/>'),
+    text: n => `<b>${esc(n)}</b> will be able to set up machines, environments, accounts and databases and to manage users. It takes effect at once.` },
+  "make-user": { label: "Make user", confirm: "Make user", icon: svg(SHIELD + '<path d="M9 12h6"/>'),
+    text: n => `<b>${esc(n)}</b> will lose access to Machines, Environments, Databases and Users at once. They can still scan indexes, run rules and see the history.` },
+  "reset": { label: "Reset password", confirm: "Reset password", icon: svg('<circle cx="8" cy="15" r="4"/><path d="M11 12l9-9M16 7l3 3M14 9l2 2"/>'),
+    text: n => `<b>${esc(n)}</b> gets a new password: the old one stops working and they are signed out at once. You are shown the new password once, to send to them; they choose their own when they sign in.` },
+  "delete": { label: "Remove user", confirm: "Remove", danger: true, icon: TRASH,
+    text: n => `<b>${esc(n)}</b> is signed out and can't sign in any more. What they did stays in the history under their name. This can't be undone.` },
+};
+const MACHINE_ACTIONS = {
+  "mach-edit": { label: "Edit machine", icon: PENCIL },
+  "mach-delete": { label: "Remove machine", confirm: "Remove", danger: true, icon: TRASH,
+    text: n => `<b>${esc(n)}</b> is removed from the list. This can't be undone. Only a machine without environments can be removed.` },
+};
+const ENV_ACTIONS = {
+  "env-rename": { label: "Edit environment", icon: PENCIL },
+  "env-delete": { label: "Remove environment", confirm: "Remove", danger: true, icon: TRASH,
+    text: n => `<b>${esc(n)}</b> and its accounts (with their saved passwords) are removed. Only an environment without databases can be removed.` },
+};
+// Environments page: the accounts and databases inside an environment
+const ACCOUNT_ACTIONS = {
+  "acc-scan": { label: "Find databases", icon: svg('<circle cx="11" cy="11" r="6"/><path d="M20 20l-4.5-4.5"/>'), tip: "Ask the server which databases this login can see" },
+  "acc-edit": { label: "Edit account", icon: PENCIL },
+  "acc-delete": { label: "Remove account", confirm: "Remove", danger: true, icon: TRASH,
+    text: n => `<b>${esc(n)}</b> and its saved password are deleted. An account that a database uses can't be removed.` },
+};
+const DATABASE_ACTIONS = {
+  "db-test": { label: "Test connection", icon: svg('<path d="M13 3L5 14h6l-1 7 8-11h-6z"/>') },
+  "db-edit": { label: "Edit database", icon: PENCIL },
+  "db-delete": { label: "Remove database", confirm: "Remove", danger: true, icon: TRASH,
+    text: (n, env) => `<b>${esc(n)}</b> is removed from ${esc(env)}. Its stored scans are deleted too (the history stays). Nothing is changed on the SQL Server. A database that a rule uses can't be removed.` },
+};
+
+// Databases page
+const CATALOG_ACTIONS = {
+  "cat-edit": { label: "Edit database", icon: PENCIL },
+  "cat-delete": { label: "Remove database", confirm: "Remove", danger: true, icon: TRASH,
+    text: n => `<b>${esc(n)}</b> is removed from the list. This can't be undone. Only a database that no environment uses can be removed.` },
+};
+const DB_ICON = svg('<ellipse cx="12" cy="6" rx="7" ry="3"/><path d="M5 6v6c0 1.7 3.1 3 7 3s7-1.3 7-3V6M5 12v6c0 1.7 3.1 3 7 3s7-1.3 7-3v-6"/>');
+
+// The details popup shows the whole row and the full error or message.
+const DETAILS = { label: "Details", icon: svg('<circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/>') };
+const firstLine = s => (String(s ?? "").split(/\r?\n/).find(l => l.trim()) || "").trim();
+const lineCell = s => s ? `<span class="firstline">${esc(firstLine(s))}</span>` : "";
+const factsHtml = facts => facts.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${v === null || v === undefined || v === "" ? '<span class="dim">–</span>' : esc(v)}</dd>`).join("");
+// facts: [[label, text], ...], empty values show a dash; full: {label, text, bad} is the untruncated error or message
+function showDetails({ title, sub, facts, full }) {
+  $("dtIcon").innerHTML = DETAILS.icon;
+  $("dtTitle").textContent = title;
+  $("dtSub").textContent = sub || ""; $("dtSub").hidden = !sub;
+  $("dtFacts").innerHTML = factsHtml(facts);
+  $("dtFullBox").hidden = !(full && full.text);
+  if (full && full.text) {
+    $("dtFullLabel").textContent = full.label;
+    $("dtFull").textContent = full.text;
+    $("dtFull").classList.toggle("bad", !!full.bad);
+  }
+  $("detailDialog").showModal();
+  $("dtClose").focus();
+}
+$("dtClose").addEventListener("click", () => $("detailDialog").close());
+
+// Resolves true only when the confirm button is pressed.
+function askConfirm({ icon, title, text, confirm, danger }) {
+  $("cfIcon").innerHTML = icon; $("cfIcon").classList.toggle("danger", !!danger);
+  $("cfTitle").textContent = title;
+  $("cfText").innerHTML = text;
+  $("cfOk").innerHTML = icon + esc(confirm);
+  $("cfOk").classList.toggle("danger", !!danger);
+  const dialog = $("confirmDialog");
+  return new Promise(resolve => {
+    dialog.returnValue = "";
+    dialog.addEventListener("close", () => resolve(dialog.returnValue === "ok"), { once: true });
+    dialog.showModal();
+    $("cfCancel").focus();           // Enter picks the safe answer
+  });
+}
+$("cfCancel").addEventListener("click", () => $("confirmDialog").close("cancel"));
+$("cfForm").addEventListener("submit", () => { $("confirmDialog").returnValue = "ok"; });
+
+function setStatus(msg, isError) {
+  const el = $("status");
+  el.textContent = msg || "";
+  el.className = msg ? "visible" + (isError ? " error" : "") : "";
+}
+
+// GET with query params, or POST a JSON body when one is given.
+async function api(path, params, body) {
+  const url = params ? path + "?" + new URLSearchParams(params) : path;
+  const res = await fetch(url, body === undefined ? {} : {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+  });
+  if (res.status === 401 && path !== "/api/login") { location.href = "/login"; throw new Error("Not signed in."); }
+  const payload = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const d = payload.detail;
+    const err = new Error(Array.isArray(d) ? d.map(x => x.msg).join("; ") : d || res.statusText);
+    if (payload.missing) err.missing = payload.missing;       // names that are not in the Databases list yet
+    throw err;
+  }
+  return payload;
+}
+
+function current() { return { environment: $("environment").value, database: $("database").value }; }
+
+// environment / database pickers
+// Switching environment or database only reads what the server has stored; the SQL Server is contacted only by the scan buttons.
+
+// No environment, or one without databases: say what to do instead.
+function showEmpty(html) {
+  state.all = false; state.data = null; state.frag = null; state.database = "";
+  state.meta = { indexes: null, fragmentation: null };
+  state.open.clear();
+  state.empty = html;
+  setStatus("");
+  updateScanButtons();
+  renderScanInfo();
+  render();
+}
+
+async function loadEnvironments() {
+  const keepEnv = $("environment").value, keepDb = $("database").value;
+  const envs = await api("/api/environments");
+  state.envs = envs;
+  $("environment").innerHTML = envs.map(e => `<option value="${esc(e.name)}">${esc(e.name)}</option>`).join("");
+  $("environment").disabled = !envs.length;
+  if (!envs.length) {
+    $("database").innerHTML = "";
+    return showEmpty('No environments yet.<br>' + (isAdmin ? 'Open <b>Environments</b> in the account menu and create one, then add its databases.' : 'Ask an administrator to set one up.'));
+  }
+  if (envs.some(e => e.name === keepEnv)) $("environment").value = keepEnv;
+  await loadDatabases(keepDb);
+}
+
+async function loadDatabases(selected) {
+  const { default: def, databases } = await api("/api/databases", { environment: $("environment").value });
+  if (!databases.length) {
+    $("database").innerHTML = "";
+    return showEmpty('This environment has no databases with an account yet.<br>' + (isAdmin ? 'Open <b>Environments</b> in the account menu, add an account to it and pick its databases.' : 'Ask an administrator to add them.'));
+  }
+  state.empty = "";
+  const pick = selected && databases.includes(selected) ? selected : def;
+  const all = selected === ALL;
+  $("database").innerHTML = `<option value="${ALL}" ${all ? "selected" : ""}>All databases</option>`
+    + databases.map(d => `<option ${!all && d === pick ? "selected" : ""}>${esc(d)}</option>`).join("");
+  await loadSnapshot();
+}
+
+async function loadSnapshot() {
+  try {
+    if ($("database").value === ALL) return applyAll(await api("/api/snapshots", { environment: $("environment").value }));
+    state.all = false;
+    updateScanButtons();
+    applySnapshot(await api("/api/snapshot", current()));
+  } catch (e) {
+    setStatus(e.message, true);
+  }
+}
+
+function applySnapshot(snap) {
+  state.database = snap.database;
+  state.meta = { indexes: snap.indexes, fragmentation: snap.fragmentation };
+  state.data = snap.indexes ? snap.indexes.data : null;
+  state.frag = snap.fragmentation ? fragMap(snap.fragmentation.data) : null;
+  state.open.clear();
+  setStatus("");
+  showUsageNotice();
+  renderScanInfo();
+  render();
+}
+
+// "All databases": one row per index definition (schema.table.index), put together from the stored scans.
+// Numbers are summed over the databases that have it; fragmentation is the worst one.
+function applyAll(res) {
+  const rows = new Map();
+  let scanned = 0, withFrag = 0, usage = true;
+  for (const d of res.databases) {
+    if (!d.indexes) continue;
+    scanned++;
+    usage = usage && d.indexes.data.usage_available;
+    const frag = d.fragmentation ? fragMap(d.fragmentation.data) : null;
+    if (frag) withFrag++;
+    for (const ix of d.indexes.data.indexes) {
+      const key = [ix.schema_name, ix.table_name, ix.index_name || ""].join(".").toLowerCase();
+      let row = rows.get(key);
+      if (!row) {
+        row = { ...ix, _key: key, object_id: ix.schema_name + "." + ix.table_name, row_count: 0, size_mb: 0, user_seeks: 0, user_scans: 0,
+                user_lookups: 0, user_updates: 0, last_read: null, dbs: [], parts: [] };
+        rows.set(key, row);
+      }
+      row.dbs.push(d.database);
+      row.parts.push({ ix, frag });
+      row.row_count += Number(ix.row_count); row.size_mb += Number(ix.size_mb);
+      for (const f of ["user_seeks", "user_scans", "user_lookups", "user_updates"]) row[f] += Number(ix[f] || 0);
+      if (ix.last_read && (!row.last_read || ix.last_read > row.last_read)) row.last_read = ix.last_read;
+    }
+  }
+  state.all = true; state.scanned = scanned; state.total = res.databases.length;
+  state.database = ALL;
+  state.meta = { indexes: null, fragmentation: null };
+  state.data = scanned ? { usage_available: usage, indexes: [...rows.values()] } : null;
+  state.frag = withFrag ? new Map() : null;   // only says "some fragmentation was scanned"; fragInfo reads each row's parts
+  state.open.clear();
+  setStatus("");
+  updateScanButtons();
+  renderScanInfo();
+  render();
+}
+
+// Not an error: without VIEW DATABASE STATE the read/write columns stay at 0.
+function showUsageNotice() {
+  if (state.data && !state.data.usage_available) {
+    setStatus("Usage statistics unavailable: the login lacks VIEW DATABASE STATE, so read/write counts show 0.");
+  }
+}
+
+const fragMap = rows => new Map(rows.map(r => [r.object_id + ":" + r.index_id, r]));
+
+// manual scans
+
+function renderScanInfo() {
+  if (!$("database").value) { $("scaninfo").innerHTML = ""; return; }
+  if (state.all) {
+    $("scaninfo").innerHTML = `<span>Stored scans of <b>${state.scanned}</b> of ${state.total} databases${state.total > state.scanned ? ` (${state.total - state.scanned} never scanned)` : ""}. Pick one database to scan it.</span>`;
+    return;
+  }
+  const line = (label, s) => `<span>${label}: <b>${s ? esc(fmtWhen(s.taken_at)) : "never"}</b>${s ? " by " + esc(s.taken_by) : ""}</span>`;
+  $("scaninfo").innerHTML = line("Last scan for indexes", state.meta.indexes) + line("Last scan for fragmentation", state.meta.fragmentation);
+}
+
+async function scan(kind) {
+  const { environment, database } = current();
+  setBusy(true);
+  setStatus(kind === "indexes"
+    ? "Scanning indexes… this reads the index definitions, sizes and usage from the database."
+    : "Scanning fragmentation… this reads every index in the database and may take a while.");
+  try {
+    const snap = await api("/api/scan/" + kind, null, { environment, database });
+    // drop the result if the user switched database mid-scan
+    if (current().environment === environment && current().database === database) {
+      state.meta[kind] = snap;
+      if (kind === "indexes") state.data = snap.data; else state.frag = fragMap(snap.data);
+      state.open.clear();
+      renderScanInfo();
+      render();
+    }
+    setStatus("");
+    showUsageNotice();
+    loadDatabases(database).catch(() => {});
+  } catch (e) {
+    setStatus(e.message, true);
+  } finally {
+    setBusy(false);
+  }
+}
+
+let scanning = false;
+function setBusy(busy) { scanning = busy; updateScanButtons(); }
+function updateScanButtons() { $("scanIndexes").disabled = $("scanFrag").disabled = scanning || state.all || !$("database").value; }
+
+// history
+
+const KIND_LABEL = { indexes: "Scan indexes", fragmentation: "Scan fragmentation", rebuild: "Rebuild index", rule: "Rule run" };
+
+function fmtDuration(ms) {
+  if (ms === null || ms === undefined) return "–";
+  if (ms < 1000) return ms + " ms";
+  const s = ms / 1000;
+  if (s < 60) return s.toFixed(1) + " s";
+  const m = Math.floor(s / 60), r = Math.round(s % 60);
+  return m < 60 ? m + " min " + r + " s" : Math.floor(m / 60) + " h " + (m % 60) + " min";
+}
+const fmtTime = iso => iso ? new Date(iso).toLocaleString([], { dateStyle: "medium", timeStyle: "medium" }) : "–";
+
+const HISTORY_PAGE_SIZES = [10, 15, 20, 50];
+const jobsView = { page: 1, size: 15, filters: {}, seq: 0 };   // filters: the value of each box of the filter row, by name
+try { const s = Number(localStorage.getItem("historyPageSize")); if (HISTORY_PAGE_SIZES.includes(s)) jobsView.size = s; } catch (e) { /* no storage: keep the default */ }
+
+const HISTORY_STATUSES = ["running", "success", "failed", "interrupted"];
+
+// The filter row is in the table head, built once so the refresh doesn't interrupt typing; only the rows and pager are replaced.
+// Each box's data-filter is its API parameter name (dates go as the UTC start or end of the local day, durations in seconds).
+// Range filters get one button each that opens #rangePop: the two API parameter names and how they read.
+const RANGES = {
+  started: { title: "Started", date: true, from: "started_from", to: "started_to" },
+  ended: { title: "Ended", date: true, from: "ended_from", to: "ended_to" },
+  duration: { title: "Duration", from: "min_duration", to: "max_duration" },
+};
+const rangeActive = name => !!(jobsView.filters[RANGES[name].from] || jobsView.filters[RANGES[name].to]);
+function rangeLabel(name) {
+  const r = RANGES[name], a = jobsView.filters[r.from], b = jobsView.filters[r.to];
+  if (r.date) {
+    const d = v => new Date(v + "T00:00:00").toLocaleDateString([], { dateStyle: "medium" });
+    return !a && !b ? "Any time" : a && b ? (a === b ? d(a) : `${d(a)} – ${d(b)}`) : a ? `From ${d(a)}` : `Until ${d(b)}`;
+  }
+  return !a && !b ? "Any length" : a && b ? `${a} – ${b} s` : a ? `At least ${a} s` : `At most ${b} s`;
+}
+
+function historyPanel(envs, dbs) {
+  const f = jobsView.filters;
+  const text = (name, label) => `<th><input type="search" data-filter="${name}" value="${esc(f[name] || "")}" placeholder="Filter" aria-label="${label}" autocomplete="off"></th>`;
+  if (f.environment && !envs.includes(f.environment)) envs = [...envs, f.environment];      // may have been removed since it was chosen
+  if (f.database && !dbs.includes(f.database)) dbs = [...dbs, f.database];
+  const pick = (name, label, options) => `<th><select data-filter="${name}" aria-label="${label}"><option value="">All</option>${
+    options.map(([v, t]) => `<option value="${esc(v)}" ${f[name] === v ? "selected" : ""}>${esc(t)}</option>`).join("")}</select></th>`;
+  const range = name => `<th><button type="button" class="rangebtn ${rangeActive(name) ? "on" : ""}" data-range="${name}" aria-haspopup="dialog" aria-expanded="false">${esc(rangeLabel(name))}</button></th>`;
+  return `<div class="panel"><div class="scroll"><table id="historyTable"><thead><tr>
+      <th>Started</th><th>Ended</th><th class="num">Duration</th><th>User</th><th>Job</th><th>Target</th><th>Environment</th><th>Database</th><th>Status</th><th>Error</th><th class="actions"></th>
+    </tr><tr class="filters">${range("started")}${range("ended")}${range("duration")}
+      ${text("user", "User")}${pick("kind", "Job", Object.entries(KIND_LABEL))}${text("target", "Target or details")}${pick("environment", "Environment", envs.map(e => [e, e]))}${pick("database", "Database", dbs.map(d => [d, d]))}
+      ${pick("status", "Status", HISTORY_STATUSES.map(s => [s, s]))}${text("error", "Error")}
+      <th class="clear"><button class="mini secondary" id="historyClear" hidden>Clear</button></th>
+    </tr></thead><tbody id="historyRows"></tbody></table></div><div id="historyPager"></div></div>`;
+}
+
+function historyParams() {
+  const p = { page: jobsView.page, page_size: jobsView.size };
+  for (const [name, value] of Object.entries(jobsView.filters)) {
+    if (!value) continue;
+    p[name] = name.endsWith("_from") ? new Date(value + "T00:00:00").toISOString()
+      : name.endsWith("_to") ? new Date(value + "T23:59:59.999").toISOString() : value;
+  }
+  return p;
+}
+
+async function loadHistory() {
+  if (document.activeElement && document.activeElement.id === "historySize") return;   // don't close the open list on the timed refresh
+  const seq = ++jobsView.seq;
+  try {
+    const res = await api("/api/jobs", historyParams());
+    if (seq !== jobsView.seq) return;       // a newer request (the filter changed meanwhile) is on its way
+    const jobs = res.jobs;
+    jobsView.page = res.page;
+    const filtered = Object.values(jobsView.filters).some(Boolean);
+    const last = Math.max(1, Math.ceil(res.total / res.page_size));
+    const from = (res.page - 1) * res.page_size + 1;
+    const pager = `<div class="pager">
+        <label class="size">Rows per page <select id="historySize">${HISTORY_PAGE_SIZES.map(n => `<option ${n === jobsView.size ? "selected" : ""}>${n}</option>`).join("")}</select></label>
+        <span class="pages"><span>${jobs.length ? `${fmtInt(from)}–${fmtInt(from + jobs.length - 1)} of ${fmtInt(res.total)}` : "0 jobs"}${filtered ? " match" : ""}</span>
+          <button class="mini secondary" data-page="${res.page - 1}" ${res.page <= 1 ? "disabled" : ""}>‹ Previous</button>
+          <span>Page ${fmtInt(res.page)} of ${fmtInt(last)}</span>
+          <button class="mini secondary" data-page="${res.page + 1}" ${res.page >= last ? "disabled" : ""}>Next ›</button></span>
+      </div>`;
+    if (!$("historyTable")) {
+      const [envs, dbs] = await Promise.all([api("/api/environments").then(list => list.map(e => e.name), () => []),
+                                             api("/api/jobs/databases").catch(() => [])]);
+      if (seq !== jobsView.seq) return;
+      $("historyBody").innerHTML = historyPanel(envs, dbs);
+    }
+    $("historyClear").hidden = !filtered;
+    $("historyPager").innerHTML = pager;
+    $("historyRows").innerHTML = jobs.length ? `${jobs.map(j => `<tr>
+        <td>${esc(fmtTime(j.started_at))}</td><td>${esc(fmtTime(j.ended_at))}</td>
+        <td class="num">${j.status === "running" ? "running…" : esc(fmtDuration(j.duration_ms))}</td>
+        <td>${esc(j.started_by)}</td><td>${esc(KIND_LABEL[j.kind] || j.kind)}</td><td>${j.target ? esc(j.target) : '<span class="dim">–</span>'}${j.details ? `<span class="sub">${esc(j.details)}</span>` : ""}</td><td>${esc(j.environment)}</td><td>${esc(j.database)}</td>
+        <td class="st-${esc(j.status)}">${esc(j.status)}</td><td class="err">${lineCell(j.error)}</td>
+        <td class="actions">${iconButton(DETAILS, `data-job="${j.id}"`, (KIND_LABEL[j.kind] || j.kind) + " " + fmtTime(j.started_at))}</td>
+      </tr>`).join("")}` : `<tr><td colspan="11" class="empty">${filtered ? "No jobs match these filters." : "No jobs have been run yet."}</td></tr>`;
+    jobsView.rows = jobs;
+  } catch (e) {
+    setStatus(e.message, true);
+  }
+}
+
+$("historyBody").addEventListener("click", e => {
+  const btn = e.target.closest("button[data-job]");
+  const j = btn && (jobsView.rows || []).find(x => x.id === Number(btn.dataset.job));
+  if (!j) return;
+  showDetails({
+    title: KIND_LABEL[j.kind] || j.kind,
+    sub: `${j.environment} · ${j.database}`,
+    facts: [["Started", fmtTime(j.started_at)], ["Ended", fmtTime(j.ended_at)], ["Duration", j.status === "running" ? "running…" : fmtDuration(j.duration_ms)],
+            ["User", j.started_by], ["Job", KIND_LABEL[j.kind] || j.kind], ["Target", j.target], ["Details", j.details],
+            ["Environment", j.environment], ["Database", j.database], ["Status", j.status]],
+    full: { label: "Error", text: j.error, bad: true },
+  });
+});
+
+let historyTimer = null;
+function showView(view) {
+  if ((view === "machines" || view === "settings" || view === "databases" || view === "users") && !isAdmin) view = "indexes";
+  for (const b of $("nav").children) b.classList.toggle("active", b.dataset.view === view);
+  $("historyView").hidden = view !== "history";
+  $("rulesView").hidden = view !== "rules";
+  $("machinesView").hidden = view !== "machines";
+  $("settingsView").hidden = view !== "settings";
+  $("profileView").hidden = view !== "profile";
+  $("databasesView").hidden = view !== "databases";
+  $("usersView").hidden = view !== "users";
+  $("indexesView").hidden = view !== "indexes";
+  $("indexesBar").hidden = view !== "indexes";
+  clearInterval(historyTimer);
+  closeRange();
+  if (view === "history") {
+    $("historyBody").innerHTML = "";       // rebuilt so the environment list is current; filters are kept
+    loadHistory();
+    historyTimer = setInterval(loadHistory, 5000);   // so a scan started by someone else shows up
+  } else if (view === "rules") {
+    loadRules();
+    historyTimer = setInterval(loadRules, 4000);     // run progress, and runs started by the scheduler
+  } else if (view === "machines") {
+    loadMachines();
+  } else if (view === "settings") {
+    loadSettings();
+  } else if (view === "databases") {
+    loadCatalog();
+  } else if (view === "users") {
+    loadUsers();
+  } else if (view === "profile") {
+    startClocks();
+    historyTimer = setInterval(tickClocks, 1000);
+  }
+}
+
+// classification
+
+function typeGroup(ix) { return ix.type_desc.replace(/_/g, " "); }
+
+const fragInfo = ix => ix.parts ? worstFrag(ix) : fragInfoIn(state.frag, ix);
+
+// Of an index that exists in several databases: the one that needs the most attention.
+function worstFrag(ix) {
+  let best = null;
+  for (const { ix: part, frag } of ix.parts) {
+    const info = { ...fragInfoIn(frag, part), pages: frag && frag.get(keyOf(part)) ? frag.get(keyOf(part)).page_count : null };
+    if (!best || rank(FRAG_ORDER, info.status) < rank(FRAG_ORDER, best.status)
+        || (info.status === best.status && (info.pct ?? -1) > (best.pct ?? -1))) best = info;
+  }
+  return best;
+}
+
+function fragInfoIn(frag, ix) {
+  if (!frag) return { status: "Not scanned", pct: null };
+  if (ix.type_desc.includes("COLUMNSTORE")) return { status: "Not applicable", pct: null };
+  const f = frag.get(keyOf(ix));
+  if (!f || f.page_count === null) return { status: "No data", pct: null };
+  // Indexes under MIN_PAGES come back with a page count but no fragmentation value (not measured).
+  const pct = f.fragmentation_pct === null ? null : Number(f.fragmentation_pct);
+  if (f.page_count < MIN_PAGES) return { status: "Too small (< 1000 pages)", pct };
+  if (pct > FRAG_REBUILD) return { status: "Rebuild (> 30%)", pct };
+  if (pct >= FRAG_REORG) return { status: "Reorganize (5-30%)", pct };
+  return { status: "Healthy (< 5%)", pct };
+}
+
+function groupOf(ix) {
+  if (state.groupBy === "type") return typeGroup(ix);
+  if (state.groupBy === "table") return ix.schema_name + "." + ix.table_name;
+  return fragInfo(ix).status;
+}
+
+function groupSorter() {
+  if (state.groupBy === "type") return (a, b) => rank(TYPE_ORDER, a) - rank(TYPE_ORDER, b) || a.localeCompare(b);
+  if (state.groupBy === "frag") return (a, b) => rank(FRAG_ORDER, a) - rank(FRAG_ORDER, b);
+  return (a, b) => a.localeCompare(b);
+}
+function rank(order, name) { const i = order.indexOf(name); return i < 0 ? order.length : i; }
+
+// rendering
+
+const COLUMNS = [
+  { key: "table", label: "Table", get: ix => ix.schema_name + "." + ix.table_name },
+  { key: "index_name", label: "Index", get: ix => ix.index_name || "" },
+  { key: "key_columns", label: "Columns", get: ix => ix.key_columns },
+  { key: "row_count", label: "Rows", num: true, get: ix => ix.row_count },
+  { key: "size_mb", label: "Size", num: true, get: ix => ix.size_mb },
+  { key: "fill_factor", label: "Fill", num: true, get: ix => ix.fill_factor },
+  { key: "reads", label: "Reads", num: true, get: ix => ix.user_seeks + ix.user_scans + ix.user_lookups },
+  { key: "user_updates", label: "Writes", num: true, get: ix => ix.user_updates },
+  { key: "last_read", label: "Last read", get: ix => ix.last_read || "" },
+  { key: "frag", label: "Fragmentation", num: true, get: ix => fragInfo(ix).pct ?? -1 },
+  { key: "dbs", label: "Databases", num: true, allOnly: true, get: ix => ix.dbs ? ix.dbs.length : 0 },
+  { key: "actions", label: "Actions", actions: true },
+];
+const columns = () => COLUMNS.filter(c => !c.allOnly || state.all);
+
+function matches(ix, q) {
+  if (!q) return true;
+  return [ix.schema_name, ix.table_name, ix.index_name, ix.key_columns, ix.included_columns].some(v => (v || "").toLowerCase().includes(q));
+}
+
+function renderSummary(all) {
+  const tables = new Set(all.map(ix => ix.object_id)).size;
+  const size = all.reduce((s, ix) => s + Number(ix.size_mb), 0);
+  const disabled = all.filter(ix => ix.is_disabled).length;
+  // "Unused" = nonclustered index that is written to but never read since the last restart.
+  const unused = state.data.usage_available
+    ? all.filter(ix => ix.index_id > 1 && !ix.is_primary_key && !ix.is_unique_constraint && ix.user_updates > 0 && ix.user_seeks + ix.user_scans + ix.user_lookups === 0).length
+    : null;
+  const stats = [
+    ...(state.all ? [[fmtInt(state.scanned), "Databases"]] : []),
+    [fmtInt(all.length), "Indexes"], [fmtInt(tables), "Tables"], [fmtMb(size), "Total size"], [fmtInt(disabled), "Disabled"],
+  ];
+  if (unused !== null) stats.push([fmtInt(unused), "Written, never read"]);
+  if (state.frag) stats.push([fmtInt(all.filter(ix => fragInfo(ix).status.startsWith("Rebuild")).length), "Need rebuild"]);
+  $("summary").innerHTML = stats.map(([v, l]) => `<div class="stat"><div class="v">${esc(v)}</div><div class="l">${esc(l)}</div></div>`).join("");
+}
+
+function tags(ix) {
+  let t = "";
+  if (ix.is_primary_key) t += '<span class="tag pk">PK</span>';
+  else if (ix.is_unique_constraint) t += '<span class="tag">UQ CONSTRAINT</span>';
+  else if (ix.is_unique && ix.index_id > 0) t += '<span class="tag">UNIQUE</span>';
+  if (ix.has_filter) t += `<span class="tag" title="${esc(ix.filter_definition)}">FILTERED</span>`;
+  if (ix.partition_count > 1) t += `<span class="tag">${ix.partition_count} PARTITIONS</span>`;
+  if (ix.is_disabled) t += '<span class="tag off">DISABLED</span>';
+  return t;
+}
+
+function fragCell(ix) {
+  const { status, pct, pages: worstPages } = fragInfo(ix);
+  const pages = ix.parts ? worstPages : state.frag && state.frag.get(keyOf(ix)) ? state.frag.get(keyOf(ix)).page_count : null;
+  let value = `<span class="dim">${status === "Not scanned" ? "–" : "n/a"}</span>`;
+  if (status.startsWith("Too small"))
+    value = `<span class="dim">&lt; ${fmtInt(MIN_PAGES)} pages</span><span class="sub">not measured (${fmtInt(pages)} pages)</span>`;
+  else if (status === "Not applicable")
+    value = `<span class="dim">n/a</span><span class="sub">columnstore</span>`;
+  if (pct !== null) {
+    const cls = status.startsWith("Rebuild") ? "frag-rebuild" : status.startsWith("Reorg") ? "frag-reorg" : status.startsWith("Healthy") ? "frag-ok" : "dim";
+    value = `<span class="${cls}">${pct.toFixed(1)}%</span>`;
+  }
+  return value;
+}
+
+// Heaps have no index to rebuild, and a disabled index would be switched back on by a rebuild.
+const canRebuild = ix => !state.all && ix.index_id > 0 && !ix.is_disabled && !!ix.index_name;
+
+// Opens the list of databases that do and don't have this index.
+const whereButton = ix => iconButton(INDEX_ACTIONS.where,
+  `data-where data-s="${esc(ix.schema_name)}" data-t="${esc(ix.table_name)}" data-i="${esc(ix.index_name || "")}"`, ix.index_name || ix.table_name,
+  { tip: `Which databases have this ${ix.index_name ? "index" : "heap"} and which don't` });
+
+// Highlighted when fragmentation says a rebuild is due; opens the options popup.
+function rebuildButton(ix, status) {
+  if (!canRebuild(ix)) return "";
+  return iconButton(INDEX_ACTIONS.rebuild, `data-rebuild="${esc(keyOf(ix))}"`, ix.index_name, { primary: status.startsWith("Rebuild") });
+}
+
+function rowHtml(ix) {
+  const reads = ix.user_seeks + ix.user_scans + ix.user_lookups;
+  const cols = ix.key_columns ? `<b>${esc(ix.key_columns)}</b>` : "";
+  const inc = ix.included_columns ? `<div>INCLUDE ${esc(ix.included_columns)}</div>` : "";
+  return `<tr>
+    <td class="name">${esc(ix.schema_name)}.${esc(ix.table_name)}</td>
+    <td class="name">${ix.index_name ? esc(ix.index_name) : '<span class="dim">(heap)</span>'}${tags(ix)}</td>
+    <td class="cols">${cols}${inc}</td>
+    <td class="num">${fmtInt(ix.row_count)}</td>
+    <td class="num">${fmtMb(ix.size_mb)}</td>
+    <td class="num">${ix.fill_factor ? ix.fill_factor + "%" : '<span class="dim">default</span>'}</td>
+    <td class="num">${fmtInt(reads)}</td>
+    <td class="num">${fmtInt(ix.user_updates)}</td>
+    <td>${fmtDate(ix.last_read)}</td>
+    <td class="num">${fragCell(ix)}</td>
+    ${state.all ? `<td class="num">${ix.dbs.length} of ${state.scanned}</td>` : ""}
+    <td class="actions"><div class="rowbtns">${rebuildButton(ix, fragInfo(ix).status)}${whereButton(ix)}</div></td>
+  </tr>`;
+}
+
+function render() {
+  $("controls").hidden = !state.data;
+  if (!state.data) {
+    $("summary").innerHTML = "";
+    $("groups").innerHTML = state.empty ? `<div class="empty">${state.empty}</div>`
+      : state.all ? '<div class="empty">No database of this environment has been scanned yet.<br>Pick one database and press <b>Scan indexes</b>.</div>'
+      : '<div class="empty">The indexes of this database have never been scanned.<br>Press <b>Scan indexes</b> to read them.</div>';
+    return;
+  }
+  const all = state.data.indexes;
+  renderSummary(all);
+
+  const q = state.filter.trim().toLowerCase();
+  const groups = new Map();
+  for (const ix of all) {
+    if (!matches(ix, q)) continue;
+    const g = groupOf(ix);
+    if (!groups.has(g)) groups.set(g, []);
+    groups.get(g).push(ix);
+  }
+  if (!groups.size) { $("groups").innerHTML = '<div class="empty">No indexes match.</div>'; return; }
+
+  const col = columns().find(c => c.key === state.sort.key) || COLUMNS[4];
+  const cmp = (a, b) => {
+    const x = col.get(a), y = col.get(b);
+    const r = typeof x === "number" ? x - y : String(x).localeCompare(String(y));
+    return r * state.sort.dir;
+  };
+  const head = columns().map(c => c.actions ? `<th class="actions">${c.label}</th>` :
+    `<th class="${c.num ? "num" : ""} ${c.key === state.sort.key ? "sorted" : ""}" data-sort="${c.key}">${c.label}${c.key === state.sort.key ? (state.sort.dir > 0 ? " ▲" : " ▼") : ""}</th>`).join("");
+
+  $("groups").innerHTML = [...groups.keys()].sort(groupSorter()).map(name => {
+    const rows = groups.get(name).sort(cmp);
+    const size = rows.reduce((s, ix) => s + Number(ix.size_mb), 0);
+    // groups start collapsed; ones you open stay open until the grouping changes or the page reloads
+    const open = state.open.has(name) && state.open.get(name);
+    const note = state.groupBy === "frag" && FRAG_NOTES[name] ? `<span class="gnote">${esc(FRAG_NOTES[name])}</span>` : "";
+    return `<details class="group" data-name="${esc(name)}" ${open ? "open" : ""}>
+      <summary><span class="gname">${esc(name)}</span><span class="gmeta">${fmtInt(rows.length)} index${rows.length === 1 ? "" : "es"} · ${fmtMb(size)}</span>${note}</summary>
+      <div class="scroll"><table><thead><tr>${head}</tr></thead><tbody>${rows.map(rowHtml).join("")}</tbody></table></div>
+    </details>`;
+  }).join("");
+}
+
+// where is this index
+
+const W = { seq: 0, data: null };
+
+async function openWhere(schema, table, index) {
+  const seq = ++W.seq;
+  W.data = null;
+  $("whereTarget").innerHTML = `${index ? `<b>${esc(index)}</b> on` : "The heap of"} <b>${esc(schema)}.${esc(table)}</b>, by schema, table and index name, in the stored index scans of environment <b>${esc($("environment").value)}</b>`;
+  $("whereFilter").value = "";
+  $("whereNote").textContent = "";
+  $("whereBody").innerHTML = '<div class="picknote">Loading…</div>';
+  $("whereDialog").showModal();
+  try {
+    const res = await api("/api/index-presence", { environment: $("environment").value, schema_name: schema, table_name: table, ...(index ? { index_name: index } : {}) });
+    if (seq !== W.seq) return;
+    W.data = res;
+    renderWhere();
+  } catch (e) {
+    if (seq === W.seq) $("whereBody").innerHTML = `<div class="picknote">${esc(e.message)}</div>`;
+  }
+}
+
+function renderWhere() {
+  const d = W.data;
+  if (!d) return;
+  const q = $("whereFilter").value.trim().toLowerCase();
+  const show = list => list.filter(x => !q || x.database.toLowerCase().includes(q));
+  const has = show(d.has), missing = show(d.missing), unscanned = show(d.unscanned.map(n => ({ database: n })));
+  const open = name => `<button class="mini secondary" data-open="${esc(name)}" title="Show this database in the Indexes view">View</button>`;
+  const rows = (list, f) => list.length ? list.map(f).join("") : '<div class="picknote">' + (q ? "No database matches." : "None") + "</div>";
+  $("whereNote").textContent = `${d.has.length} of ${d.has.length + d.missing.length} scanned databases have it`;
+  $("whereBody").innerHTML = `<div class="cols2">
+      <div class="wbox yes"><h3><span>Available in</span><span class="n">${fmtInt(has.length)}</span></h3><div class="wlist">${rows(has, x =>
+        `<div class="wrow"><span class="nm">${esc(x.database)}${x.is_disabled ? ' <span class="tag off">DISABLED</span>' : ""}</span>`
+        + `<span class="meta">${esc(x.type_desc.replace(/_/g, " ").toLowerCase())} · ${esc(fmtMb(x.size_mb))}</span>${open(x.database)}</div>`)}</div></div>
+      <div class="wbox no"><h3><span>Not available in</span><span class="n">${fmtInt(missing.length)}</span></h3><div class="wlist">${rows(missing, x =>
+        `<div class="wrow"><span class="nm">${esc(x.database)}</span>${open(x.database)}</div>`)}</div></div>
+    </div>
+    ${d.unscanned.length ? `<details class="unk"><summary>Not scanned yet (${fmtInt(unscanned.length)}): unknown, because their indexes were never read</summary>
+      <div class="wlist">${rows(unscanned, x => `<div class="wrow"><span class="nm">${esc(x.database)}</span>${open(x.database)}</div>`)}</div></details>` : ""}`;
+}
+
+$("whereFilter").addEventListener("input", renderWhere);
+$("whereClose").addEventListener("click", () => $("whereDialog").close());
+$("whereBody").addEventListener("click", e => {
+  const b = e.target.closest("button[data-open]");
+  if (!b) return;
+  $("whereDialog").close();
+  showView("indexes");
+  $("database").value = b.dataset.open;
+  loadSnapshot();
+});
+
+// rebuild
+
+// Popup defaults: online, page compression, MAXDOP 0, sort in the index's own database.
+// Columnstore, XML and spatial indexes keep their current compression.
+const REBUILD_DEFAULTS = { online: true, compression: "PAGE", maxdop: 0, sortInTempdb: false };
+const LARGE_INDEX_MB = 10 * 1024;
+const rb = { ix: null, busy: false };
+
+const isColumnstore = ix => ix.type_desc.includes("COLUMNSTORE");
+const supportsOnline = ix => !/XML|SPATIAL/.test(ix.type_desc);   // same rule as indexes.supports_online
+const COMPRESSION_LABEL = { NONE: "None", ROW: "Row", PAGE: "Page", COLUMNSTORE: "Columnstore", COLUMNSTORE_ARCHIVE: "Columnstore archive" };
+const compressionChoices = ix => isColumnstore(ix) ? ["COLUMNSTORE", "COLUMNSTORE_ARCHIVE"] : supportsOnline(ix) ? ["NONE", "ROW", "PAGE"] : [];
+
+function readRebuildOptions() {
+  const dop = $("rbDop").value.trim();
+  return {
+    online: $("rbMode").value === "online",
+    compression: $("rbComp").value,                       // "" = keep what the index has
+    maxdop: /^\d+$/.test(dop) ? Number(dop) : NaN,
+    sortInTempdb: $("rbTemp").checked,
+  };
+}
+
+const rebuildClause = o => ["ONLINE = " + (o.online ? "ON" : "OFF")]
+  .concat(o.compression ? ["DATA_COMPRESSION = " + o.compression] : [])
+  .concat(["MAXDOP = " + o.maxdop, "SORT_IN_TEMPDB = " + (o.sortInTempdb ? "ON" : "OFF")]).join(", ");
+
+// Explains the chosen options and shows the statement that will run.
+function refreshRebuild() {
+  const ix = rb.ix, o = readRebuildOptions();
+  const valid = Number.isInteger(o.maxdop) && o.maxdop >= 0 && o.maxdop <= 64;
+  $("rbInvalid").hidden = valid;
+  $("rbInvalid").textContent = valid ? "" : "MAXDOP must be a whole number from 0 to 64.";
+  $("rbGo").disabled = !valid || rb.busy;
+  $("rbSql").hidden = !valid;
+  $("rbSql").textContent = valid
+    ? `ALTER INDEX [${ix.index_name}] ON [${ix.schema_name}].[${ix.table_name}]\nREBUILD WITH (${rebuildClause(o)})`
+    : "";
+
+  const now = ix.data_compression ? ix.data_compression : null;
+  const compression = !o.compression
+    ? `<b>Compression:</b> unchanged${now ? " (" + esc(now.toLowerCase()) + ")" : ""}; the index is rebuilt the way it is.`
+    : `<b>Compression:</b> the index is rewritten with <b>${esc(o.compression.toLowerCase().replace("_", " "))}</b> compression${now ? ` (now ${esc(now.toLowerCase())})` : ""}. `
+      + ({ PAGE: "Page saves the most space but costs more CPU when the data is read and written.",
+           ROW: "Row saves some space for little CPU.",
+           NONE: "None stores the data uncompressed and uses the most space.",
+           COLUMNSTORE: "Columnstore is the normal columnstore compression; it removes archive compression.",
+           COLUMNSTORE_ARCHIVE: "Archive saves more space but is slower to read; meant for rarely used data." }[o.compression] || "");
+  const points = [
+    "<b>What it does:</b> drops the index and builds it again from the table data. That removes fragmentation, packs the pages tightly and refreshes the index's statistics. The data itself is not changed.",
+    o.online
+      ? "<b>Online:</b> the table stays readable and writable while it runs; it only blocks briefly at the start and the end. It is slower and needs extra space while it runs."
+      : "<b>Offline:</b> faster, but the table is locked while it runs and other sessions may have to wait for it.",
+    compression,
+    "<b>MAXDOP:</b> " + (!valid ? "not valid yet; enter a whole number from 0 to 64." : o.maxdop === 0
+      ? "0 uses the database/server default (up to 64 processors), so the rebuild can take a lot of CPU."
+      : o.maxdop === 1 ? "1 runs it on a single processor: slowest, but the gentlest on other workloads."
+      : `at most ${esc(o.maxdop)} processors are used, which limits the CPU load.`),
+    o.sortInTempdb
+      ? "<b>Sort in tempdb:</b> the sorting is done in tempdb instead of the database's own files. It can be faster, but needs extra tempdb space (about the size of the index). Works online and offline."
+      : "<b>Sort in tempdb:</b> off, so the sorting uses the database's own space, as SQL Server does by default.",
+    `<b>Cost:</b> it reads and rewrites the whole index (${esc(fmtMb(ix.size_mb))}), so expect disk and transaction-log load, and a run time that grows with the size.`,
+    `<b>Who and where:</b> it runs against the live database <b>${esc(current().database)}</b> (environment <b>${esc(current().environment)}</b>) with the account an administrator assigned to it under Environments, and is recorded in History under your name.`,
+    "<b>If it is cancelled or fails part-way,</b> the old index stays in place.",
+  ];
+  $("rbPoints").innerHTML = points.map(t => `<li>${t}</li>`).join("");
+}
+
+function openRebuild(ix) {
+  rb.ix = ix;
+  const { status, pct } = fragInfo(ix);
+  const { database } = current();
+  $("rbTitle").textContent = "Rebuild this index?";
+  $("rbTarget").innerHTML = `<b>${esc(ix.index_name)}</b> on <b>${esc(ix.schema_name)}.${esc(ix.table_name)}</b> in <b>${esc(database)}</b>`;
+  const fact = (l, v) => `<div class="fact"><span class="l">${l}</span>${esc(v)}</div>`;
+  $("rbFacts").innerHTML = fact("Type", typeGroup(ix)) + fact("Size", fmtMb(ix.size_mb)) + fact("Rows", fmtInt(ix.row_count))
+    + fact("Fragmentation", pct === null ? "not measured" : pct.toFixed(1) + "%")
+    + (ix.data_compression ? fact("Compression", ix.data_compression.toLowerCase()) : "");
+
+  // options that fit this index type
+  const canOnline = supportsOnline(ix), choices = compressionChoices(ix);
+  $("rbMode").value = canOnline && REBUILD_DEFAULTS.online ? "online" : "offline";
+  $("rbMode").querySelector('option[value="online"]').disabled = !canOnline;
+  $("rbMode").disabled = !canOnline;
+  $("rbMode").title = canOnline ? "" : "XML and spatial indexes can only be rebuilt offline";
+  $("rbComp").innerHTML = `<option value="">Keep current${ix.data_compression ? " (" + esc(ix.data_compression.toLowerCase()) + ")" : ""}</option>`
+    + choices.map(c => `<option value="${c}">${COMPRESSION_LABEL[c]}</option>`).join("");
+  $("rbComp").value = !isColumnstore(ix) && choices.includes(REBUILD_DEFAULTS.compression) ? REBUILD_DEFAULTS.compression : "";
+  $("rbComp").disabled = !choices.length;
+  $("rbDop").value = REBUILD_DEFAULTS.maxdop;
+  $("rbTemp").checked = REBUILD_DEFAULTS.sortInTempdb;
+  for (const id of ["rbMode", "rbComp", "rbDop", "rbTemp"]) $(id).disabled = id === "rbMode" ? !canOnline : id === "rbComp" ? !choices.length : false;
+
+  const notes = [];
+  if (!status.startsWith("Rebuild")) {
+    notes.push(status.startsWith("Reorg") ? `At ${pct.toFixed(1)}% this index is below the 30% level where a rebuild is recommended; reorganizing is usually enough.`
+      : status.startsWith("Healthy") ? "This index is barely fragmented, so a rebuild will gain very little."
+      : status.startsWith("Too small") ? "This index is under 1000 pages, where fragmentation has little effect and a rebuild is rarely worthwhile."
+      : "Its fragmentation hasn't been measured, so it isn't known whether a rebuild is needed.");
+  }
+  if (Number(ix.size_mb) >= LARGE_INDEX_MB) {
+    notes.push(`This is a large index (${fmtMb(ix.size_mb)}). Rebuilding it can take hours and generate a lot of transaction log; consider doing it outside business hours.`);
+  }
+  const advice = $("rbMsg");
+  advice.className = "note";
+  advice.innerHTML = notes.map(esc).join("<br>");
+  advice.hidden = !notes.length;
+
+  $("rbExplain").hidden = false; $("rbOptions").hidden = false;
+  $("rbGo").hidden = false; $("rbGo").textContent = "Rebuild index";
+  $("rbCancel").disabled = false; $("rbCancel").textContent = "Cancel";
+  refreshRebuild();
+  $("rebuildDialog").showModal();
+  $("rbCancel").focus();   // the safe choice is the default one
+}
+
+async function confirmRebuild() {
+  const ix = rb.ix, o = readRebuildOptions(), { environment, database } = current();
+  rb.busy = true;
+  for (const id of ["rbMode", "rbComp", "rbDop", "rbTemp", "rbGo", "rbCancel"]) $(id).disabled = true;
+  $("rbGo").textContent = "Rebuilding…";
+  $("rbTitle").textContent = "Rebuilding…";
+  const msg = $("rbMsg");
+  msg.className = "note"; msg.hidden = false;
+  msg.textContent = "Please wait; this can take a while for a large index. It is safe to leave this page open or close it: the rebuild continues on the server.";
+  setBusy(true);
+  const started = performance.now();
+  try {
+    const res = await api("/api/rebuild", null, {
+      environment, database, schema_name: ix.schema_name, table_name: ix.table_name, index_name: ix.index_name,
+      online: o.online, data_compression: o.compression || null, maxdop: o.maxdop, sort_in_tempdb: o.sortInTempdb,
+    });
+    const before = fragInfo(ix).pct;
+    if (res.fragmentation && current().environment === environment && current().database === database) {
+      state.meta.fragmentation = res.fragmentation;
+      state.frag = fragMap(res.fragmentation.data);
+      render();
+    }
+    const after = res.entry ? (res.entry.fragmentation_pct === null ? null : Number(res.entry.fragmentation_pct)) : null;
+    const took = fmtDuration(Math.round(performance.now() - started));
+    $("rbTitle").textContent = "Rebuild finished";
+    msg.className = "result";
+    msg.textContent = `${ix.index_name} was rebuilt ${res.online ? "online" : "offline"} in ${took}.`
+      + (res.entry ? ` Fragmentation: ${before === null ? "not measured" : before.toFixed(1) + "%"} → ${after === null ? "below the measuring threshold" : after.toFixed(1) + "%"}.` : "")
+      + ` Options: ${res.options}.`;
+  } catch (e) {
+    $("rbTitle").textContent = "Rebuild failed";
+    msg.className = "result error";
+    msg.textContent = e.message;
+  } finally {
+    rb.busy = false;
+    setBusy(false);
+    $("rbExplain").hidden = true; $("rbOptions").hidden = true;
+    $("rbGo").hidden = true;
+    $("rbCancel").disabled = false; $("rbCancel").textContent = "Close";
+    $("rbCancel").focus();
+  }
+}
+
+$("groups").addEventListener("click", e => {
+  const where = e.target.closest("button[data-where]");
+  if (where) return openWhere(where.dataset.s, where.dataset.t, where.dataset.i);
+  const btn = e.target.closest("button[data-rebuild]");
+  if (!btn || !state.data) return;
+  const ix = state.data.indexes.find(i => keyOf(i) === btn.dataset.rebuild);
+  if (ix) openRebuild(ix);
+});
+$("rbOptions").addEventListener("input", refreshRebuild);
+$("rbOptions").addEventListener("change", refreshRebuild);
+$("rbCancel").addEventListener("click", () => $("rebuildDialog").close());
+$("rbGo").addEventListener("click", confirmRebuild);
+// Escape must not close the dialog mid-rebuild, or the result is never seen.
+$("rebuildDialog").addEventListener("cancel", e => { if (rb.busy) e.preventDefault(); });
+
+// rules
+
+const DAY_SHORT = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+const R = { list: [], tz: "", closed: new Set() };   // closed: the machines whose rules are hidden (kept in this browser)
+try { R.closed = new Set(JSON.parse(localStorage.getItem("rulesClosed") || "[]")); } catch (e) { /* no storage: all shown */ }
+const pct1 = v => v === null || v === undefined ? "–" : Number(v).toFixed(1) + "%";
+
+// "2026-10-25 00:00:00": the wall clock in zone tz (the server's zone when empty)
+function fmtAt(iso, tz) {
+  if (!tz) return iso.slice(0, 19).replace("T", " ");
+  try { return new Date(iso).toLocaleString("sv-SE", { timeZone: tz }); } catch { return iso.slice(0, 19).replace("T", " "); }
+}
+
+function fmtIn(iso) {
+  const mins = Math.round((new Date(iso) - Date.now()) / 60000);
+  if (mins < 1) return "any moment";
+  if (mins < 60) return "in " + mins + " min";
+  if (mins < 2880) return "in " + Math.floor(mins / 60) + " h " + (mins % 60) + " min";
+  return "in " + Math.round(mins / 1440) + " days";
+}
+
+const doneWord = r => r.kind === "scan" ? "scanned" : "rebuilt";   // what a successful item of the rule's runs is called
+
+const optionsText = r => {
+  const o = r.options;
+  return [o.online === false ? "Offline" : "Online", o.data_compression ? COMPRESSION_LABEL[o.data_compression] + " compression" : "current compression",
+    "MAXDOP " + o.maxdop, o.sort_in_tempdb ? "sort in tempdb" : null].filter(Boolean).join(", ");
+};
+
+async function loadRules() {
+  if (dragRow) { R.stale = true; return; }          // the 4-second refresh must not rebuild the table under the dragged row
+  R.stale = false;
+  try {
+    const res = await api("/api/rules");
+    R.list = res.rules; R.tz = res.timezone;
+    renderRules();
+  } catch (e) {
+    $("rulesBody").innerHTML = `<div class="panel"><div class="empty">${esc(e.message)}</div></div>`;
+  }
+}
+
+// "DB1, DB2" for a few databases, "7 databases" for many (the full list is in the tooltip).
+const dbText = (r, max = 2) => r.databases.length <= max ? r.databases.join(", ") : `${r.databases.length} databases`;
+
+function renderRules() {
+  if (!R.list.length) { $("rulesBody").innerHTML = '<div class="panel"><div class="empty">No rules yet. Press “New rule” to create one.</div></div>'; return; }
+  // one table per machine (the machine of the rule's environment); rules whose environment has none come last
+  const groups = new Map();
+  for (const r of R.list) {
+    const key = r.machine || "";
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(r);
+  }
+  const order = [...groups.keys()].sort((a, b) => !a ? 1 : !b ? -1 : a.localeCompare(b, undefined, { sensitivity: "base" }));
+  const ruleRow = r => {
+      const last = r.last_run;
+      const scan = r.kind === "scan";
+      const q = r.queued;
+      const lastCell = r.running && r.stopping
+        ? `<span class="st-queued">stopping…</span><span class="sub">Cancelling what it is doing now</span>`
+        : r.running
+        ? `<span class="st-running">running…</span>${last && last.status === "running" ? `<span class="sub">${last.n_success + last.n_failed + last.n_skipped} of ${last.n_total} done</span>` : ""}`
+        : q ? `<span class="st-queued">waiting…</span><span class="sub">${q.position === 1 ? "Next" : "Number " + q.position + " in line"} on ${esc(r.machine || "its machine")}${q.behind ? ` · after ${esc(q.behind)}` : ""}</span>`
+        : last ? `<span class="st-${esc(last.status)}">${esc(last.status)}</span><span class="sub">${esc(fmtWhen(last.started_at))}</span>`
+            + (last.status === "skipped" ? "" : `<span class="sub">${last.n_success} ${doneWord(r)} · ${last.n_skipped} skipped · ${last.n_failed} failed</span>`)
+          : '<span class="dim">never</span>';
+      const next = r.next_run ? `<span class="sub">Next: ${esc(fmtAt(r.next_run, r.schedule.tz))} ${esc(r.schedule.tz || "server time")} (${esc(fmtIn(r.next_run))})</span>`
+        : '<span class="sub">Started by hand</span>';
+      const e = r.execution;
+      return `<tr data-id="${r.id}">
+        <td class="prio"><span class="grip" draggable="true" data-id="${r.id}" title="Drag to change the priority" aria-hidden="true">⋮⋮</span><b>${r.priority}</b></td>
+        <td class="wrap"><b>${esc(r.name)}</b><span class="tag${scan ? "" : " pk"}">${scan ? "SCAN" : "REBUILD"}</span><span class="sub" title="${esc(r.databases.join(", "))}">${esc(r.environment)} · ${esc(dbText(r))}</span></td>
+        <td class="wrap">${esc(r.schedule_text)}${next}</td>
+        <td class="num">${scan ? '<span class="dim">–</span>' : fmtInt(r.indexes.length)}${!scan && r.databases.length > 1 ? `<span class="sub">in ${r.databases.length} databases</span>` : ""}</td>
+        ${scan ? `<td class="wrap">Scans the indexes and their fragmentation<span class="sub">Refreshes the Indexes page; changes nothing on the server</span></td>`
+          : `<td class="wrap">${r.min_fragmentation === null ? "Every listed index" : `Only if fragmentation > ${esc(r.min_fragmentation)}%`}${r.databases.length > 1 ? " <span class=\"dim\">(in each database that has it)</span>" : ""}
+          <span class="sub">${esc(optionsText(r))}</span>
+          <span class="sub">${e.mode === "parallel" ? `In parallel, up to ${e.max_parallel} at once` : "One by one"}</span></td>`}
+        <td class="wrap">${lastCell}</td>
+        <td class="actions"><div class="rowbtns">
+          ${[r.running ? "stop" : q ? "unqueue" : "run", "history", "edit", "duplicate", "delete"].map(act => iconButton(RULE_ACTIONS[act], `data-act="${act}" data-id="${r.id}"`, r.name, {
+            primary: act === "run", disabled: act === "delete" && r.running || act === "stop" && r.stopping,
+            tip: act === "delete" && r.running ? "Stop the run before deleting the rule" : act === "stop" && r.stopping ? "Stopping…" : RULE_ACTIONS[act].label })).join("")}
+        </div></td></tr>`;
+  };
+  $("rulesBody").innerHTML = `<div id="rulesTable">${order.map(key => `<details class="rulegroup" data-key="${esc(key)}" ${R.closed.has(key) ? "" : "open"}>
+    <summary class="sethead"><div><h2>${key ? esc(key) : "No machine"}</h2><p class="hint">${plural(groups.get(key).length, "rule", "rules")} · one runs at a time, the lowest priority number first${key ? "" : " · their environment is not on a machine yet (Environments → Edit)"}</p></div></summary>
+    <div class="panel"><div class="scroll"><table data-group="${esc(key)}"><thead><tr>
+      <th class="prio">Priority</th><th>Rule</th><th>Schedule</th><th class="num">Indexes</th><th>What it does</th><th>Last run</th><th class="actions">Actions</th>
+    </tr></thead><tbody>${groups.get(key).map(ruleRow).join("")}</tbody></table></div></div></details>`).join("")}</div>`;
+}
+
+// Remember which machine groups are collapsed, across refreshes and reloads.
+$("rulesBody").addEventListener("toggle", e => {
+  if (!e.target.matches("details.rulegroup")) return;
+  if (e.target.open) R.closed.delete(e.target.dataset.key); else R.closed.add(e.target.dataset.key);
+  try { localStorage.setItem("rulesClosed", JSON.stringify([...R.closed])); } catch (err) { /* not remembered */ }
+}, true);
+
+// Drag a rule by its grip onto another rule of the same machine; the machine's new order is sent
+// and priorities are renumbered 1, 2, 3 ...
+let dragRow = null;
+const clearDrop = () => document.querySelectorAll("#rulesTable tr.drop-before, #rulesTable tr.drop-after").forEach(t => t.classList.remove("drop-before", "drop-after"));
+const sameGroup = tr => dragRow && tr && tr.closest("table") === dragRow.closest("table");
+
+$("rulesBody").addEventListener("dragstart", e => {
+  const grip = e.target.closest && e.target.closest(".grip");
+  if (!grip) return;
+  dragRow = grip.closest("tr");
+  dragRow.classList.add("dragging");
+  e.dataTransfer.effectAllowed = "move";
+  e.dataTransfer.setData("text/plain", grip.dataset.id);
+  e.dataTransfer.setDragImage(dragRow, 20, 20);
+});
+$("rulesBody").addEventListener("dragover", e => {
+  const tr = e.target.closest && e.target.closest("tr[data-id]");
+  if (!sameGroup(tr)) return;                       // another machine: no drop
+  e.preventDefault();
+  clearDrop();
+  if (tr !== dragRow) tr.classList.add(e.clientY < tr.getBoundingClientRect().top + tr.offsetHeight / 2 ? "drop-before" : "drop-after");
+});
+$("rulesBody").addEventListener("drop", async e => {
+  const tr = e.target.closest && e.target.closest("tr[data-id]");
+  if (!sameGroup(tr)) return;
+  e.preventDefault();
+  if (tr === dragRow) return endDrag();             // dropped where it was
+  const before = e.clientY < tr.getBoundingClientRect().top + tr.offsetHeight / 2;
+  const rows = [...tr.closest("tbody").querySelectorAll("tr[data-id]")].filter(x => x !== dragRow);
+  rows.splice(rows.indexOf(tr) + (before ? 0 : 1), 0, dragRow);
+  const ids = rows.map(x => Number(x.dataset.id));
+  endDrag();
+  try { await api("/api/rules/reorder", null, { ids }); } catch (err) { alert(err.message); }
+  loadRules();
+});
+function endDrag() {
+  clearDrop();
+  if (dragRow) dragRow.classList.remove("dragging");
+  dragRow = null;
+}
+$("rulesBody").addEventListener("dragend", () => { endDrag(); if (R.stale) loadRules(); });
+
+const ruleById = id => R.list.find(r => r.id === Number(id));
+
+async function ruleAction(act, id) {
+  const r = ruleById(id);
+  if (!r) return;
+  const ask = (key, text) => { const a = RULE_ACTIONS[key]; return askConfirm({ icon: a.icon, title: a.label, text, confirm: a.confirm, danger: a.danger }); };
+  try {
+    if (act === "run") {
+      const many = r.databases.length > 1;
+      if (r.kind === "scan") {
+        const text = `<b>${esc(r.name)}</b> will scan the indexes and their fragmentation of ${many ? `each of the ${r.databases.length} databases (${dbText(r, 5)})` : esc(r.databases[0])} (${esc(r.environment)}), one by one, each database using its own account, and store them for the Indexes page. Nothing is changed on the SQL Server. It keeps running on the server if you close this page.`;
+        if (!await ask("run", text)) return;
+        await api(`/api/rules/${r.id}/run`, null, {});
+        return loadRules();
+      }
+      const what = r.min_fragmentation === null ? `rebuild all ${r.indexes.length} listed indexes` : `check ${r.indexes.length} indexes and rebuild those above ${r.min_fragmentation}% fragmentation`;
+      const where = many ? `in each of the ${r.databases.length} databases (${dbText(r, 5)}) that has them` : `in ${r.databases[0]}`;
+      const text = `<b>${esc(r.name)}</b> will ${esc(what)} ${esc(where)} (${esc(r.environment)}), ${r.execution.mode === "parallel" ? "up to " + r.execution.max_parallel + " at once" : "one by one"}, each database using its own account. It keeps running on the server if you close this page.`;
+      if (!await ask("run", text)) return;
+      await api(`/api/rules/${r.id}/run`, null, {});
+    } else if (act === "stop") {
+      if (!await ask("stop", r.kind === "scan" ? `<b>${esc(r.name)}</b> is running. The database being scanned right now is cancelled (nothing is saved for it) and the rest are skipped.` : RULE_ACTIONS.stop.text(r.name))) return;
+      await api(`/api/rule-runs/${r.running_run_id}/stop`, null, {});
+    } else if (act === "unqueue") {
+      await api(`/api/rules/${r.id}/unqueue`, null, {});
+    } else if (act === "delete") {
+      if (!await ask("delete", RULE_ACTIONS.delete.text(r.name))) return;
+      await api(`/api/rules/${r.id}/delete`, null, {});
+    } else if (act === "history") {
+      return openRuns(r);
+    } else if (act === "edit") {
+      return openRuleEditor(r);
+    } else if (act === "duplicate") {
+      return openDuplicate(r);
+    }
+  } catch (e) {
+    alert(e.message);
+  }
+  loadRules();
+}
+
+$("rulesBody").addEventListener("click", e => {
+  const b = e.target.closest("button[data-act]");
+  if (b) ruleAction(b.dataset.act, b.dataset.id);
+});
+// duplicate a rule, into another environment or the same one
+
+const dup = { rule: null, report: null, seq: 0, named: false };
+const DUP_ICON = {
+  warning: svg('<path d="M12 4l9 16H3z"/><path d="M12 10v4M12 17h.01"/>'),
+  error: svg('<circle cx="12" cy="12" r="9"/><path d="M9 9l6 6M15 9l-6 6"/>'),
+  ok: svg('<circle cx="12" cy="12" r="9"/><path d="M8.5 12.5l2.5 2.5 4.5-5"/>'),
+};
+
+function openDuplicate(r) {
+  const own = e => e.name.toLowerCase() === r.environment.toLowerCase();
+  const choices = [...state.envs.filter(own), ...state.envs.filter(e => !own(e))];      // the rule's own environment first, then the others
+  dup.rule = r; dup.report = null; dup.named = false;
+  $("dupSub").innerHTML = `Copies <b>${esc(r.name)}</b> (${esc(r.environment)} · ${esc(dbText(r))}) into another environment, or into the same one, keeping its options and execution. The databases and indexes are matched by name against what is stored for the environment you pick.`;
+  $("dupEnv").innerHTML = choices.map(e => `<option value="${esc(e.name)}">${esc(e.name)}</option>`).join("");
+  $("dupName").value = "";
+  $("dupManualField").hidden = r.schedule.type === "manual";
+  $("dupManual").checked = false;
+  $("dupSchedText").textContent = `The original runs: ${r.schedule_text}. The copy gets the same schedule unless you tick this.`;
+  $("dupMsg").hidden = true;
+  $("dupDialog").showModal();
+  checkDuplicate();
+}
+
+async function checkDuplicate() {
+  const seq = ++dup.seq;
+  dup.report = null;
+  $("dupGo").disabled = true; $("dupMsg").hidden = true;
+  $("dupReport").innerHTML = '<div class="picknote">Checking the databases and indexes…</div>';
+  let rep;
+  try {
+    rep = await api(`/api/rules/${dup.rule.id}/duplicate`, { environment: $("dupEnv").value });
+  } catch (e) {
+    if (seq === dup.seq) $("dupReport").innerHTML = `<div class="dupnote error">${DUP_ICON.error}<span>${esc(e.message)}</span></div>`;
+    return;
+  }
+  if (seq !== dup.seq) return;
+  dup.report = rep;
+  if (!dup.named) $("dupName").value = rep.name;
+  const scan = rep.kind === "scan";
+  const notes = rep.notes.map(n => `<div class="dupnote ${n.level}">${DUP_ICON[n.level]}<span>${esc(n.text)}</span></div>`).join("");
+  const has = `${fmtInt(rep.databases.length)} of ${fmtInt(rep.databases_total)} databases${scan ? "" : ` and ${fmtInt(rep.indexes)} of ${fmtInt(rep.indexes_total)} indexes`}`;
+  $("dupReport").innerHTML = (rep.can_create ? `<p class="dupsum">The copy in <b>${esc(rep.environment)}</b> gets ${has}.</p>` : "")
+    + notes + (rep.notes.length ? "" : `<div class="dupnote ok">${DUP_ICON.ok}<span>Every database${scan ? "" : " and index"} exists in ${esc(rep.environment)}.</span></div>`);
+  $("dupGo").disabled = !rep.can_create;
+}
+
+$("dupEnv").addEventListener("change", checkDuplicate);
+$("dupName").addEventListener("input", () => { dup.named = true; });
+$("dupCancel").addEventListener("click", () => $("dupDialog").close());
+$("dupForm").addEventListener("submit", async e => {
+  e.preventDefault();
+  if (!dup.report || !dup.report.can_create) return;
+  const name = $("dupName").value.trim();
+  if (!name) { $("dupMsg").textContent = "Enter a name for the copy."; $("dupMsg").hidden = false; return; }
+  $("dupGo").disabled = true;
+  try {
+    await api(`/api/rules/${dup.rule.id}/duplicate`, null, { environment: $("dupEnv").value, name, manual: $("dupManual").checked && !$("dupManualField").hidden });
+  } catch (err) {
+    $("dupMsg").textContent = err.message; $("dupMsg").hidden = false;
+    $("dupGo").disabled = false;
+    return;
+  }
+  $("dupDialog").close();
+  loadRules();
+});
+
+$("newRule").addEventListener("click", () => openRuleEditor(null));
+$("refreshRules").addEventListener("click", loadRules);
+
+// rule editor
+
+const ed = { id: null, selected: new Map(), names: [], dbs: new Set(), snaps: new Map(), def: "", seq: 0, days: new Set([6]) };
+const refKey = (s, t, n) => [s, t, n].map(encodeURIComponent).join("/");
+const refOf = key => { const [schema_name, table_name, index_name] = key.split("/").map(decodeURIComponent); return { schema_name, table_name, index_name }; };
+
+function renderDayChips() {
+  $("ruleDays").innerHTML = DAY_SHORT.map((d, i) => `<button type="button" data-day="${i}" class="${ed.days.has(i) ? "on" : ""}" aria-pressed="${ed.days.has(i)}">${d}</button>`).join("");
+}
+
+const BROWSER_TZ = (() => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone || ""; } catch { return ""; } })();
+const ZONES = (() => {
+  let list = [];
+  try { list = Intl.supportedValuesOf("timeZone"); } catch { /* old browser: UTC only */ }
+  return ["UTC", ...list.filter(z => z !== "UTC")];
+})();
+
+// Options: the server's clock (used by rules saved before time zones existed) and every IANA zone.
+function fillZones(selected) {
+  const zones = selected && !ZONES.includes(selected) ? [selected, ...ZONES] : ZONES;
+  $("ruleTz").innerHTML = `<option value="">Server time (${esc(R.tz)})</option>` + zones.map(z => `<option value="${esc(z)}">${esc(z)}</option>`).join("");
+  $("ruleTz").value = selected;
+}
+
+function refreshRuleForm() {
+  const scan = $("ruleKind").value === "scan";
+  document.querySelectorAll("#ruleDialog [data-rebuild]").forEach(s => { s.hidden = scan; });
+  $("ruleIntro").textContent = scan
+    ? "A scan rule reads the indexes and their fragmentation from the databases you pick, on a schedule or when you start it by hand, and stores them for the Indexes page. It changes nothing on the SQL Server. Every run is kept in the rule's history."
+    : "A rule rebuilds the indexes you pick, on a schedule or when you start it by hand. If you set a fragmentation condition, it measures just those indexes right before rebuilding them; it never scans the whole database (use a scan rule for that). Every run is kept in the rule's history.";
+  $("dbHint").textContent = scan
+    ? "Each selected database is scanned, indexes and fragmentation, using its own account. The fragmentation scan reads index pages, so on a big database pick a quiet hour."
+    : "When the rule runs, each index below is looked up in every selected database and rebuilt only in the ones that have it. The fragmentation condition is checked in each database on its own.";
+  $("ruleName").placeholder = scan ? "e.g. Nightly scan" : "e.g. Weekly rebuild";
+  const kind = $("ruleSched").value;
+  $("ruleDays").hidden = kind !== "weekly";
+  $("ruleTimeField").hidden = $("ruleTzField").hidden = kind === "manual";
+  const days = [...ed.days].sort((a, b) => a - b);
+  const zone = $("ruleTz").value ? $("ruleTz").value : "server time (" + R.tz + ")";
+  $("ruleSchedText").textContent = kind === "manual" ? "It never runs by itself. Start it with “Run now” in the rules list; saving does not run it."
+    : (kind === "daily" || days.length === 7 ? "Runs every day" : days.length ? "Runs every " + days.map(d => DAY_SHORT[d]).join(", ") : "Choose at least one day")
+      + " at " + ($("ruleTime").value || "00:00:00") + ", " + zone + ".";
+  $("ruleFrag").disabled = !$("ruleFragOn").checked;
+  $("ruleFragField").classList.toggle("off", !$("ruleFragOn").checked);
+  $("ruleFragHint").textContent = $("ruleFragOn").checked
+    ? "Fragmentation is measured when the rule runs, not taken from the last scan. Indexes under 1,000 pages and columnstore indexes can't be checked, so they are skipped."
+    : "Every index in the list is rebuilt, whatever its fragmentation.";
+  $("ruleParField").hidden = $("ruleExec").value !== "parallel";
+  $("ruleExecHint").textContent = $("ruleExec").value === "parallel"
+    ? "Several indexes are rebuilt at the same time, at most the number above. That finishes sooner but loads the server, the disks and the transaction log harder."
+    : "Indexes are rebuilt one after the other, which is the gentlest on the server.";
+}
+
+async function openRuleEditor(rule) {
+  if (!state.envs.length) { alert(isAdmin ? "Create an environment, add an account to it and pick its databases under Environments (account menu) first." : "There is nothing to rule yet: an administrator has to set up an environment and its databases first."); return; }
+  ed.id = rule ? rule.id : null;
+  ed.selected = new Map((rule ? rule.indexes : []).map(i => [refKey(i.schema_name, i.table_name, i.index_name), i]));
+  ed.names = []; ed.dbs = new Set(); ed.snaps = new Map();
+  $("ruleTitle").textContent = rule ? "Edit rule" : "New rule";
+  showRuleKind(rule ? rule.kind : "rebuild");
+  for (const b of $("ruleKindSeg").children) b.disabled = !!rule;       // a rule keeps its type; make a new one to change it
+  $("ruleName").value = rule ? rule.name : "";
+  $("rulePriority").value = ed.prio0 = rule ? rule.priority : "";
+  $("rulePriority").placeholder = rule ? "" : "last";
+  const sch = rule ? rule.schedule : { type: "weekly", days: [6], time: "00:00:00" };
+  $("ruleSched").value = sch.type;
+  ed.days = new Set(sch.days || (rule ? [] : [6]));
+  $("ruleTime").value = sch.time || "00:00:00";
+  fillZones(rule ? sch.tz || "" : myTz || BROWSER_TZ);
+  const o = rule ? rule.options : { online: true, data_compression: "PAGE", maxdop: 0, sort_in_tempdb: false };
+  $("ruleMode").value = o.online === false ? "offline" : "online";
+  $("ruleComp").value = o.data_compression || "";
+  $("ruleDop").value = o.maxdop;
+  $("ruleTemp").checked = o.sort_in_tempdb;
+  $("ruleFragOn").checked = !!rule && rule.min_fragmentation !== null;
+  $("ruleFrag").value = rule && rule.min_fragmentation !== null ? rule.min_fragmentation : 30;
+  $("ruleExec").value = rule ? rule.execution.mode : "serial";
+  $("rulePar").value = rule ? rule.execution.max_parallel : 4;
+  $("pickFilter").value = ""; $("dbFilter").value = "";
+  $("ruleMsg").hidden = true;
+  $("ruleSave").disabled = false;
+  renderDayChips();
+  refreshRuleForm();
+  $("pickList").innerHTML = $("dbList").innerHTML = '<div class="picknote">Loading…</div>';
+  $("ruleDialog").showModal();
+
+  $("ruleEnvironment").innerHTML = state.envs.map(e => `<option value="${esc(e.name)}">${esc(e.name)}</option>`).join("");
+  $("ruleEnvironment").value = rule ? rule.environment : $("environment").value;
+  await loadRuleDatabases(rule ? rule.databases : $("database").value === ALL ? [] : [$("database").value]);
+}
+
+// Offers the environment's databases and their stored scans; preselect (the rule's databases,
+// or the one being viewed) is ticked, else the environment's default.
+async function loadRuleDatabases(preselect) {
+  const seq = ++ed.seq, environment = $("ruleEnvironment").value;
+  $("pickList").innerHTML = $("dbList").innerHTML = '<div class="picknote">Loading…</div>';
+  let names = [];
+  try {
+    const [d, s] = await Promise.all([api("/api/databases", { environment }), api("/api/snapshots", { environment })]);
+    if (seq !== ed.seq) return;
+    names = d.databases; ed.def = d.default || "";
+    ed.snaps = new Map(s.databases.map(x => [x.database, x]));
+  } catch (e) {
+    if (seq !== ed.seq) return;
+    ed.def = ""; ed.snaps = new Map();
+  }
+  const known = new Map(names.map(n => [n.toLowerCase(), n]));         // database names compare case-insensitively
+  const chosen = (preselect.length ? preselect : ed.def ? [ed.def] : []).map(n => known.get(n.toLowerCase()) || n);
+  for (const n of chosen) if (!known.has(n.toLowerCase())) { known.set(n.toLowerCase(), n); names = [n, ...names]; }
+  ed.names = names; ed.dbs = new Set(chosen);
+  renderDbList();
+  renderPicker();
+}
+
+function renderDbList() {
+  const q = $("dbFilter").value.trim().toLowerCase();
+  const shown = ed.names.filter(n => !q || n.toLowerCase().includes(q));
+  $("dbList").innerHTML = shown.length ? shown.map(n => {
+    const s = ed.snaps.get(n), scanned = !!(s && s.indexes);
+    return `<label class="prow dbrow"><input type="checkbox" data-db="${esc(n)}" ${ed.dbs.has(n) ? "checked" : ""}>
+      <span class="nm">${esc(n)}</span>${scanned ? `<span class="dim">scanned ${esc(fmtWhen(s.indexes.taken_at))}</span>` : '<span class="tag off">never scanned</span>'}</label>`;
+  }).join("") : `<div class="picknote">${ed.names.length ? "No databases match." : "No databases with an account in this environment yet. An administrator can add them under Environments."}</div>`;
+  $("dbCount").textContent = `${ed.dbs.size} of ${ed.names.length} selected`;
+}
+
+function changeDbs() {
+  $("dbCount").textContent = `${ed.dbs.size} of ${ed.names.length} selected`;
+  renderPicker();
+}
+
+$("dbList").addEventListener("change", e => {
+  const box = e.target.closest("input[data-db]");
+  if (!box) return;
+  if (box.checked) ed.dbs.add(box.dataset.db); else ed.dbs.delete(box.dataset.db);
+  changeDbs();
+});
+$("dbFilter").addEventListener("input", renderDbList);
+$("dbAll").addEventListener("click", () => {
+  const q = $("dbFilter").value.trim().toLowerCase();
+  for (const n of ed.names) if (!q || n.toLowerCase().includes(q)) ed.dbs.add(n);
+  renderDbList(); changeDbs();
+});
+$("dbNone").addEventListener("click", () => { ed.dbs.clear(); renderDbList(); changeDbs(); });
+
+// The indexes of the selected databases, one row per schema.table.index however many databases have it.
+function pickerRows(scanned) {
+  const rows = new Map();
+  for (const name of scanned) {
+    const snap = ed.snaps.get(name), frag = snap.fragmentation ? fragMap(snap.fragmentation.data) : null;
+    for (const ix of snap.indexes.data.indexes) {
+      if (!ix.index_name || ix.type_desc === "HEAP") continue;
+      const key = refKey(ix.schema_name, ix.table_name, ix.index_name), id = key.toLowerCase();
+      let row = rows.get(id);
+      if (!row) rows.set(id, row = { key, table: ix.schema_name + "." + ix.table_name, name: ix.index_name, ix, parts: [], dbs: [], off: 0 });
+      row.parts.push({ ix, frag }); row.dbs.push(name);
+      if (ix.is_disabled) row.off++;
+    }
+  }
+  return rows;
+}
+
+function renderPicker() {
+  const q = $("pickFilter").value.trim().toLowerCase();
+  const chosen = ed.names.filter(n => ed.dbs.has(n));
+  const scanned = chosen.filter(n => { const s = ed.snaps.get(n); return s && s.indexes; });
+  const unscanned = chosen.filter(n => !scanned.includes(n));
+  const rows = pickerRows(scanned);
+  const groups = new Map();
+  const add = (table, row) => { if (!groups.has(table)) groups.set(table, []); groups.get(table).push(row); };
+  for (const row of rows.values()) {
+    if (q && !(row.table + " " + row.name).toLowerCase().includes(q)) continue;
+    const { status, pct } = worstFrag(row);
+    const fr = pct !== null ? pct.toFixed(1) + "%" : status.startsWith("Too small") ? "small" : status === "Not applicable" ? "n/a" : status === "Not scanned" ? "–" : "no data";
+    const cls = pct === null ? "dim" : status.startsWith("Rebuild") ? "frag-rebuild" : status.startsWith("Reorg") ? "frag-reorg" : "frag-ok";
+    const missing = scanned.filter(n => !row.dbs.includes(n));
+    const where = scanned.length > 1 ? { text: `in ${row.dbs.length} of ${scanned.length}`,
+      title: `In: ${row.dbs.join(", ")}` + (missing.length ? `\nNot in: ${missing.join(", ")}` : "") } : null;
+    add(row.table, { key: row.key, name: row.name, type: typeGroup(row.ix), fr, cls, where,
+      off: row.off === row.dbs.length, someOff: row.off && row.off < row.dbs.length ? row.off : 0 });
+  }
+  for (const [k, ref] of ed.selected) {
+    if (rows.has(k.toLowerCase())) continue;
+    const table = ref.schema_name + "." + ref.table_name;
+    if (q && !(table + " " + ref.index_name).toLowerCase().includes(q)) continue;
+    add("Not in the last scans", { key: k, name: table + " · " + ref.index_name, type: "", fr: "?", cls: "dim", off: false });
+  }
+  const note = unscanned.length
+    ? `<div class="picknote warn">No stored scan for ${esc(unscanned.join(", "))}, so its indexes aren't listed here. The rule still looks up the chosen indexes there when it runs.</div>` : "";
+  if (!groups.size) {
+    $("pickList").innerHTML = note + `<div class="picknote">${!chosen.length ? "Select at least one database above."
+      : !scanned.length ? "No index scan is stored for the selected databases yet. Scan indexes on the Indexes tab first." : "No indexes match."}</div>`;
+  } else {
+    $("pickList").innerHTML = note + [...groups].map(([table, rows]) => `<div class="pgroup">
+      <label class="ptable"><input type="checkbox" data-table> <b>${esc(table)}</b> <span class="dim">${rows.length} index${rows.length === 1 ? "" : "es"}</span></label>
+      ${rows.map(r => `<label class="prow ${r.off && !ed.selected.has(r.key) ? "dis" : ""}">
+        <input type="checkbox" data-k="${esc(r.key)}" ${ed.selected.has(r.key) ? "checked" : ""} ${r.off && !ed.selected.has(r.key) ? "disabled" : ""}>
+        <span class="nm">${esc(r.name)}${r.off ? ' <span class="tag off">DISABLED</span>' : r.someOff ? ` <span class="tag off" title="Disabled indexes are skipped when the rule runs">DISABLED in ${r.someOff}</span>` : ""}</span>
+        ${r.where ? `<span class="dim" title="${esc(r.where.title)}">${esc(r.where.text)}</span>` : ""}
+        ${r.type ? `<span class="tag">${esc(r.type)}</span>` : ""}<span class="fr ${r.cls}">${esc(r.fr)}</span></label>`).join("")}
+    </div>`).join("");
+  }
+  syncPicker();
+}
+
+function syncPicker() {
+  for (const g of $("pickList").querySelectorAll(".pgroup")) {
+    const boxes = [...g.querySelectorAll("input[data-k]")].filter(b => !b.disabled), on = boxes.filter(b => b.checked).length;
+    const head = g.querySelector("input[data-table]");
+    head.checked = boxes.length > 0 && on === boxes.length;
+    head.indeterminate = on > 0 && on < boxes.length;
+    head.disabled = !boxes.length;
+  }
+  $("pickCount").textContent = ed.selected.size + " selected";
+}
+
+function pick(box, on) {
+  if (on) ed.selected.set(box.dataset.k, refOf(box.dataset.k)); else ed.selected.delete(box.dataset.k);
+  box.checked = on;
+}
+
+$("pickList").addEventListener("change", e => {
+  const t = e.target;
+  if (t.matches("input[data-k]")) pick(t, t.checked);
+  else if (t.matches("input[data-table]")) for (const b of t.closest(".pgroup").querySelectorAll("input[data-k]")) if (!b.disabled) pick(b, t.checked);
+  syncPicker();
+});
+$("pickFilter").addEventListener("input", renderPicker);
+$("pickAll").addEventListener("click", () => { for (const b of $("pickList").querySelectorAll("input[data-k]")) if (!b.disabled) pick(b, true); syncPicker(); });
+$("pickNone").addEventListener("click", () => { ed.selected.clear(); renderPicker(); });
+
+$("ruleDays").addEventListener("click", e => {
+  const b = e.target.closest("button[data-day]");
+  if (!b) return;
+  const d = Number(b.dataset.day);
+  if (ed.days.has(d)) ed.days.delete(d); else ed.days.add(d);
+  renderDayChips();
+  refreshRuleForm();
+});
+for (const id of ["ruleSched", "ruleTime", "ruleTz", "ruleFragOn", "ruleExec"]) $(id).addEventListener("change", refreshRuleForm);
+function showRuleKind(kind) {
+  $("ruleKind").value = kind;
+  for (const b of $("ruleKindSeg").children) {
+    b.classList.toggle("active", b.dataset.kind === kind);
+    b.setAttribute("aria-pressed", String(b.dataset.kind === kind));
+  }
+}
+$("ruleKindSeg").addEventListener("click", e => {
+  const btn = e.target.closest("button[data-kind]");
+  if (!btn || btn.disabled || btn.dataset.kind === $("ruleKind").value) return;
+  showRuleKind(btn.dataset.kind);
+  // new scan rules default to daily, rebuild rules to weekly
+  if (ed.id === null) $("ruleSched").value = btn.dataset.kind === "scan" ? "daily" : "weekly";
+  refreshRuleForm();
+});
+$("ruleTime").addEventListener("input", refreshRuleForm);
+$("ruleEnvironment").addEventListener("change", () => loadRuleDatabases([]));
+$("ruleCancel").addEventListener("click", () => $("ruleDialog").close());
+
+function ruleError(msg) { const m = $("ruleMsg"); m.textContent = msg; m.hidden = !msg; if (msg) m.scrollIntoView({ block: "nearest" }); }
+
+async function saveRule() {
+  const kind = $("ruleSched").value, days = [...ed.days].sort((a, b) => a - b);
+  const dop = $("ruleDop").value.trim(), par = $("rulePar").value.trim(), frag = $("ruleFrag").value.trim();
+  const name = $("ruleName").value.trim();
+  if (!name) return ruleError("Give the rule a name.");
+  const databases = ed.names.filter(n => ed.dbs.has(n));
+  if (!databases.length) return ruleError("Select at least one database.");
+  const scan = $("ruleKind").value === "scan";
+  if (!scan && !ed.selected.size) return ruleError("Select at least one index to rebuild.");
+  const prio = $("rulePriority").value.trim();
+  if (prio !== "" && !(/^\d+$/.test(prio) && Number(prio) >= 1)) return ruleError("Priority must be a whole number, 1 or more (1 goes first).");
+  if (kind === "weekly" && !days.length) return ruleError("Choose at least one day of the week.");
+  if (kind !== "manual" && !$("ruleTime").value) return ruleError("Enter the start time.");
+  if (!scan) {
+    if ($("ruleFragOn").checked && !(frag !== "" && Number(frag) >= 0 && Number(frag) <= 100)) return ruleError("The fragmentation condition must be a number from 0 to 100.");
+    if (!/^\d+$/.test(dop) || Number(dop) > 64) return ruleError("MAXDOP must be a whole number from 0 to 64.");
+    if ($("ruleExec").value === "parallel" && !(/^\d+$/.test(par) && Number(par) >= 1 && Number(par) <= 16)) return ruleError("“At most at once” must be a whole number from 1 to 16.");
+  }
+  ruleError("");
+  const body = {
+    kind: scan ? "scan" : "rebuild", name, environment: $("ruleEnvironment").value, databases,
+    priority: prio === "" || (ed.id !== null && prio === String(ed.prio0)) ? null : Number(prio),     // untouched on an edit: it keeps its place
+    schedule: { type: kind, days: kind === "weekly" ? days : [], time: $("ruleTime").value || "00:00:00", tz: kind === "manual" ? null : $("ruleTz").value || null },
+  };
+  if (!scan) Object.assign(body, {
+    indexes: [...ed.selected.values()].map(i => ({ schema_name: i.schema_name, table_name: i.table_name, index_name: i.index_name })),
+    min_fragmentation: $("ruleFragOn").checked ? Number(frag) : null,
+    online: $("ruleMode").value === "online", data_compression: $("ruleComp").value || null,
+    maxdop: Number(dop), sort_in_tempdb: $("ruleTemp").checked,
+    execution: $("ruleExec").value, max_parallel: $("ruleExec").value === "parallel" ? Number(par) : 4,
+  });
+  $("ruleSave").disabled = true;
+  try {
+    await api(ed.id === null ? "/api/rules" : `/api/rules/${ed.id}`, null, body);
+    $("ruleDialog").close();
+    loadRules();
+  } catch (e) {
+    ruleError(e.message);
+    $("ruleSave").disabled = false;
+  }
+}
+$("ruleSave").addEventListener("click", saveRule);
+
+// rule history
+
+const H = { rule: null, runs: [], view: null, items: new Map(), timer: null, seq: 0 };   // view: the run whose popup is open
+
+async function openRuns(rule) {
+  H.rule = rule; H.runs = []; H.view = null; H.items = new Map();
+  $("runsTitle").textContent = "History: " + rule.name;
+  $("runsSub").textContent = `${rule.environment} · ${dbText(rule, 6)}. Open a run to see what happened to each ${rule.kind === "scan" ? "database" : "index"}. Times are shown in your time zone.`;
+  $("runsBody").innerHTML = '<div class="empty">Loading…</div>';
+  $("runsDialog").showModal();
+  await loadRuns();
+  clearInterval(H.timer);
+  H.timer = setInterval(loadRuns, 3000);
+}
+
+async function loadRuns() {
+  const seq = ++H.seq, rule = H.rule;
+  try {
+    const runs = await api(`/api/rules/${rule.id}/runs`);
+    const wanted = runs.filter(r => H.view === r.id && (!H.items.has(r.id) || H.items.get(r.id).status !== r.status || r.status === "running"));
+    const fetched = await Promise.all(wanted.map(r => api(`/api/rule-runs/${r.id}`).catch(() => null)));
+    if (seq !== H.seq || H.rule !== rule) return;
+    fetched.forEach(f => { if (f) H.items.set(f.id, f); });
+    H.runs = runs;
+    renderRuns();
+  } catch (e) {
+    if (seq === H.seq) $("runsBody").innerHTML = `<div class="empty">${esc(e.message)}</div>`;
+  }
+}
+
+function itemsHtml(run) {
+  if (!run) return '<div class="dim" style="padding:10px">Loading…</div>';
+  if (!run.items.length) return `<div class="dim" style="padding:10px">No ${H.rule.kind === "scan" ? "databases" : "indexes"} were recorded for this run.</div>`;
+  if (H.rule.kind === "scan") {
+    return `<table class="inner"><thead><tr><th>Database</th><th>Status</th><th class="num">Duration</th><th>Message</th><th></th></tr></thead><tbody>${run.items.map(i => `<tr>
+      <td>${esc(i.database_name || "")}</td>
+      <td class="st-${esc(i.status)}">${esc(i.status)}</td>
+      <td class="num">${i.status === "running" ? "running…" : esc(fmtDuration(i.duration_ms))}</td>
+      <td class="msg">${lineCell(i.message)}</td>
+      <td class="actions">${itemButton(run, i)}</td></tr>`).join("")}</tbody></table>`;
+  }
+  const dbs = run.items.some(i => i.database_name);     // runs from before rules had several databases have none
+  return `<table class="inner"><thead><tr>${dbs ? "<th>Database</th>" : ""}<th>Index</th><th>Status</th><th class="num">Pages</th><th>Fragmentation</th><th>Options</th><th class="num">Duration</th><th>Message</th><th></th></tr></thead><tbody>${run.items.map(i => `<tr>
+    ${dbs ? `<td>${esc(i.database_name || "")}</td>` : ""}<td>${esc(i.index_name)}<span class="sub">${esc(i.schema_name)}.${esc(i.table_name)}</span></td>
+    <td class="st-${esc(i.status)}">${esc(i.status)}</td>
+    <td class="num">${i.page_count === null ? "–" : fmtInt(i.page_count)}</td>
+    <td>${esc(pct1(i.frag_before))} → ${esc(pct1(i.frag_after))}</td>
+    <td class="msg">${esc(i.options || "")}</td>
+    <td class="num">${i.status === "running" ? "running…" : esc(fmtDuration(i.duration_ms))}</td>
+    <td class="msg">${lineCell(i.message)}</td>
+    <td class="actions">${itemButton(run, i)}</td></tr>`).join("")}</tbody></table>`;
+}
+
+const itemButton = (run, i) => iconButton(DETAILS, `data-item="${i.id}" data-run="${run.id}"`,
+  H.rule.kind === "scan" ? i.database_name : `${i.index_name} in ${i.database_name || "the database"}`);
+
+// Popup for one run: facts, the full note and per-database/index results; follows a run in progress.
+function showRunDetails(r) {
+  H.view = r.id;
+  $("rdIcon").innerHTML = DETAILS.icon;
+  renderRunPopup();
+  if (!$("runDialog").open) $("runDialog").showModal();
+  $("rdClose").focus();
+  if (!H.items.has(r.id) || r.status === "running") loadRuns();
+}
+
+function renderRunPopup() {
+  const r = H.runs.find(x => x.id === H.view);
+  if (!r) return;
+  const rule = H.rule;
+  $("rdTitle").textContent = "Run of " + rule.name;
+  $("rdSub").textContent = `${rule.environment} · ${dbText(rule, 6)}`;
+  $("rdFacts").innerHTML = factsHtml([["Started", fmtTime(r.started_at)], ["Ended", fmtTime(r.ended_at)], ["Duration", r.status === "running" ? "running…" : fmtDuration(r.duration_ms)],
+    ["Started by", r.started_by], ["How", r.trigger === "schedule" ? "Scheduled" : "Manual"], ["Status", r.stopping && r.status === "running" ? "stopping…" : r.status],
+    ["Result", r.status === "skipped" ? "" : `${r.n_success} ${doneWord(rule)} · ${r.n_skipped} skipped · ${r.n_failed} failed of ${r.n_total}`]]);
+  $("rdNoteBox").hidden = !r.error;
+  $("rdNote").textContent = r.error || "";
+  $("rdNote").classList.toggle("bad", ["failed", "partial", "interrupted"].includes(r.status));
+  $("rdItemsTitle").textContent = rule.kind === "scan" ? "Databases" : "Indexes";
+  $("rdItems").innerHTML = itemsHtml(H.items.get(r.id));
+}
+
+function showItemDetails(run, i) {
+  const scan = H.rule.kind === "scan";
+  showDetails({
+    title: scan ? i.database_name : i.index_name,
+    sub: scan ? `Scan in ${H.rule.environment}` : `${i.schema_name}.${i.table_name} in ${i.database_name || "the database"} (${H.rule.environment})`,
+    facts: [["Database", i.database_name], ...(scan ? [] : [["Schema", i.schema_name], ["Table", i.table_name], ["Index", i.index_name]]),
+            ["Status", i.status],
+            ...(scan ? [] : [["Pages", i.page_count === null ? "" : fmtInt(i.page_count)], ["Fragmentation", i.frag_before === null && i.frag_after === null ? "" : `${pct1(i.frag_before)} → ${pct1(i.frag_after)}`], ["Options", i.options]]),
+            ["Started", i.started_at ? fmtTime(i.started_at) : ""], ["Ended", i.ended_at ? fmtTime(i.ended_at) : ""],
+            ["Duration", i.status === "running" ? "running…" : i.duration_ms === null ? "" : fmtDuration(i.duration_ms)]],
+    full: { label: "Message", text: i.message, bad: i.status === "failed" },
+  });
+}
+
+const RERUN = { label: "Run again", icon: svg('<path d="M20 11a8 8 0 0 0-14.5-4M4 4v4h4"/><path d="M4 13a8 8 0 0 0 14.5 4M20 20v-4h-4"/>') };
+
+function renderRuns() {
+  if (!H.runs.length) { $("runsBody").innerHTML = '<div class="empty">This rule has not run yet.</div>'; return; }
+  const now = ruleById(H.rule.id) || H.rule;            // a busy rule can't be started again
+  const busy = now.running ? "It is running now" : now.queued ? "It is waiting for its turn" : "";
+  $("runsBody").innerHTML = `<div class="scroll"><table><thead><tr><th>Started</th><th>Started by</th><th>Status</th><th class="num">Duration</th><th class="actions">Actions</th></tr></thead><tbody>${H.runs.map(r => `<tr class="run" data-run="${r.id}">
+      <td>${esc(fmtTime(r.started_at))}</td>
+      <td>${esc(r.started_by)}<span class="sub">${r.trigger === "schedule" ? "scheduled" : "manual"}</span></td>
+      <td class="st-${esc(r.status)}">${r.stopping && r.status === "running" ? "stopping…" : esc(r.status)}</td>
+      <td class="num">${r.status === "running" ? "running…" : esc(fmtDuration(r.duration_ms))}</td>
+      <td class="actions"><div class="rowbtns">${iconButton(DETAILS, `data-detail-run="${r.id}"`, "this run")}${iconButton(RERUN, `data-rerun="${r.id}"`, H.rule.name, { primary: true, disabled: !!busy, tip: busy || RERUN.label })}${r.status === "running" ? iconButton(RULE_ACTIONS.stop, `data-stop="${r.id}"`, "this run", { disabled: r.stopping, tip: r.stopping ? "Stopping…" : RULE_ACTIONS.stop.label }) : ""}</div></td></tr>`).join("")}</tbody></table></div>`;
+  renderRunPopup();
+}
+
+$("runsBody").addEventListener("click", async e => {
+  const runBtn = e.target.closest("button[data-detail-run]");
+  if (runBtn) { const r = H.runs.find(x => x.id === Number(runBtn.dataset.detailRun)); if (r) showRunDetails(r); return; }
+  if (e.target.closest("button[data-rerun]")) { await ruleAction("run", H.rule.id); return loadRuns(); }
+  const stop = e.target.closest("button[data-stop]");
+  if (stop) {
+    const a = RULE_ACTIONS.stop;
+    if (!await askConfirm({ icon: a.icon, title: a.label, text: H.rule.kind === "scan" ? "The database being scanned right now is cancelled (nothing is saved for it) and the rest are skipped." : RULE_ACTIONS.stop.text(H.rule.name), confirm: a.confirm, danger: true })) return;
+    try { await api(`/api/rule-runs/${stop.dataset.stop}/stop`, null, {}); } catch (err) { alert(err.message); }
+    return loadRuns();
+  }
+  const row = e.target.closest("tr.run");
+  const r = row && H.runs.find(x => x.id === Number(row.dataset.run));
+  if (r) showRunDetails(r);
+});
+$("rdItems").addEventListener("click", e => {
+  const itemBtn = e.target.closest("button[data-item]");
+  if (!itemBtn) return;
+  const run = H.items.get(Number(itemBtn.dataset.run));
+  const item = run && run.items.find(x => x.id === Number(itemBtn.dataset.item));
+  if (item) showItemDetails(run, item);
+});
+$("rdClose").addEventListener("click", () => $("runDialog").close());
+$("runDialog").addEventListener("close", () => { H.view = null; });
+$("runsClose").addEventListener("click", () => $("runsDialog").close());
+$("runsDialog").addEventListener("close", () => { clearInterval(H.timer); H.seq++; $("runDialog").close(); loadRules(); });
+
+// settings
+// One card per environment, with its accounts (server + login, not tied to a database) and its databases,
+// each connecting through one of the environment's accounts. A database without an account is only listed here.
+// Passwords go to the server and are never sent back.
+
+const S = { machines: [], environments: [], accounts: [], databases: [], tests: new Map(), open: new Set() };   // open: lower-case names of the expanded environments; they all start collapsed
+
+async function loadSettings() {
+  try {
+    const res = await api("/api/settings");
+    S.machines = res.machines; S.environments = res.environments; S.accounts = res.accounts; S.databases = res.databases;
+    renderSettings();
+  } catch (e) {
+    $("settingsBody").innerHTML = `<div class="empty">${esc(e.message)}</div>`;
+  }
+}
+
+// After any change: reload this page and the other views' environment/database pickers.
+async function settingsChanged() {
+  S.tests.clear();
+  await Promise.all([loadSettings(), loadEnvironments().catch(e => setStatus(e.message, true))]);
+}
+
+const plural = (n, one, many) => n + " " + (n === 1 ? one : many);
+
+// send(createMissing) adds databases to an environment. If some names aren't in the Databases list yet, a popup
+// asks and, on confirm, the request is repeated with them created. Resolves {result, created};
+// rethrows the server's error if the popup is cancelled.
+async function withCreate(send) {
+  try {
+    return { result: await send(false), created: [] };
+  } catch (e) {
+    if (!e.missing) throw e;
+    const n = e.missing.length, one = n === 1;
+    const shown = e.missing.slice(0, 8).map(x => `<b>${esc(x)}</b>`).join(", ") + (n > 8 ? ` and ${n - 8} more` : "");
+    const ok = await askConfirm({ icon: DB_ICON, title: one ? "Create this database?" : `Create these ${n} databases?`, confirm: "Create",
+      text: `${shown} ${one ? "isn't" : "aren't"} in the Databases list yet. Create ${one ? "it" : "them"} there and carry on?` });
+    if (!ok) throw e;
+    return { result: await send(true), created: e.missing };
+  }
+}
+const rowButtons = html => `<td class="actions"><div class="rowbtns">${html}</div></td>`;
+const sameEnv = (a, b) => a.toLowerCase() === b.toLowerCase();
+
+function testCell(d) {
+  const t = S.tests.get(d.id);
+  if (!t) return '<span class="dim">not tested</span>';
+  if (t.busy) return '<span class="st-running">testing…</span>';
+  return `<span class="${t.ok ? "st-success" : "st-failed"}">${t.ok ? "✓ " : "✗ "}${esc(t.message)}</span>`;
+}
+
+function renderSettings() {
+  const table = (heads, rows) => `<div class="scroll"><table><thead><tr>${heads}</tr></thead><tbody>${rows}</tbody></table></div>`;
+  const sub = (title, text, add, body) => `<div class="subsec"><div class="subhead"><div><h3>${title}</h3><p class="hint">${text}</p></div>${add}</div>${body}</div>`;
+
+  const cards = S.environments.map(e => {
+    const env = esc(e.name);
+    const accounts = S.accounts.filter(a => sameEnv(a.environment, e.name));
+    const databases = S.databases.filter(d => sameEnv(d.environment, e.name));
+    const hidden = databases.filter(d => !d.account_id).length;
+
+    const accBody = accounts.length
+      ? table('<th>Account</th><th>Server</th><th>Login</th><th>Sign-in</th><th class="num">Databases</th><th class="actions">Actions</th>', accounts.map(a => `<tr>
+          <td><b>${esc(a.name)}</b></td><td>${esc(a.server)}</td><td>${esc(a.username)}</td>
+          <td>${a.auth === "entra" ? "Microsoft Entra ID" : a.has_password ? "SQL login · password saved" : 'SQL login · <span class="dim">no password</span>'}</td>
+          <td class="num">${a.n_databases || '<span class="dim">0</span>'}</td>
+          ${rowButtons(["acc-scan", "acc-edit", "acc-delete"].map(act => iconButton(ACCOUNT_ACTIONS[act], `data-act="${act}" data-id="${a.id}"`, a.name,
+            { primary: act === "acc-scan", tip: ACCOUNT_ACTIONS[act].tip })).join(""))}</tr>`).join(""))
+      : '<div class="empty">No accounts in this environment yet. Add one: the databases it can see are listed right after.</div>';
+
+    const dbBody = (hidden ? `<p class="warnline">${plural(hidden, "database has", "databases have")} no account, so ${hidden === 1 ? "it is" : "they are"} hidden everywhere else. Use “Find databases” on an account to give ${hidden === 1 ? "it one" : "them one"}, or Edit.</p>` : "")
+      + (databases.length
+        ? table('<th>Database</th><th>Account</th><th>Connection</th><th class="actions">Actions</th>', databases.map(d => `<tr>
+            <td><b>${esc(d.name)}</b></td>
+            <td>${d.account_id ? esc(d.account_name) : '<span class="tag off">needs an account</span>'}</td>
+            <td class="wrap">${testCell(d)}</td>
+            ${rowButtons(["db-test", "db-edit", "db-delete"].map(act => {
+              const busy = (S.tests.get(d.id) || {}).busy, cannotTest = act === "db-test" && (!d.account_id || busy);
+              return iconButton(DATABASE_ACTIONS[act], `data-act="${act}" data-id="${d.id}"`, d.name, { primary: act === "db-test", disabled: cannotTest,
+                tip: cannotTest ? (busy ? "Testing…" : "Give it an account first (Edit)") : DATABASE_ACTIONS[act].label });
+            }).join(""))}</tr>`).join(""))
+        : `<div class="empty">${accounts.length ? "No databases yet. Use “Find databases” on an account, or add one by name." : "Add an account first; the databases are then picked from what it can see."}</div>`);
+
+    return `<details class="setsec" data-name="${env}" ${S.open.has(e.name.toLowerCase()) ? "open" : ""}>
+      <summary class="sethead"><div><h2>${env}</h2><p class="hint">${e.machine ? `Machine ${esc(e.machine)}` : '<span class="tag off">no machine</span>'} · ${plural(accounts.length, "account", "accounts")} · ${plural(databases.length, "database", "databases")}</p></div>
+        <div class="rowbtns">${["env-rename", "env-delete"].map(act => iconButton(ENV_ACTIONS[act], `data-act="${act}" data-name="${env}"`, e.name)).join("")}</div></summary>
+      ${sub("Accounts", "A server and a login (SQL or Microsoft Entra ID). One account can reach several databases, or just one.", `<button data-act="acc-add" data-env="${env}">Add account</button>`, accBody)}
+      ${sub("Databases", "Only databases with an account show up in the Indexes view and in the rules.",
+        `<button class="secondary" data-act="db-add" data-env="${env}" ${accounts.length ? "" : 'disabled title="Add an account first"'}>Add database by name</button>`, dbBody)}
+    </details>`;
+  });
+
+  const noMachine = S.environments.filter(e => !e.machine_id).length;
+  $("settingsBody").innerHTML = `<div class="setbar">
+      <div><h2 class="pagetitle">Environments</h2><p class="hint">Where the databases live: an environment is on a machine and holds its accounts and databases.</p></div>
+      <button data-act="env-add" ${S.machines.length ? "" : 'disabled title="Add a machine first (Machines page)"'}>Add environment</button></div>`
+    + (S.machines.length ? "" : '<p class="warnline">There are no machines yet, so no environment can be added. Add a machine first: menu → Machines.</p>')
+    + (noMachine && S.machines.length ? `<p class="warnline">${plural(noMachine, "environment is", "environments are")} not on a machine yet (made before machines existed). Use Edit to pick ${noMachine === 1 ? "its" : "their"} machine.</p>` : "")
+    + (cards.length ? cards.join("") : '<div class="setsec"><div class="empty">No environments yet. Add one first.</div></div>');
+}
+
+// Form dialog. fields: [{id, label, value, type, options:[{value,label}], hint, placeholder, maxlength, required, disabled}]
+// A field with options is a select, or a button switch when type is "switch"; a switch's change(value)
+// runs on show and on every click so it can adapt the other fields.
+// send(values) makes the request: success closes the dialog, failure shows the error.
+// after(result) runs once the dialog is closed and the data reloaded; refresh() replaces the default settings reload.
+const F = { fields: [], send: null, after: null, refresh: null };
+
+function openForm({ title, intro, fields, submit, send, after, refresh }) {
+  F.fields = fields; F.send = send; F.after = after || null; F.refresh = refresh || null;
+  $("formTitle").textContent = title;
+  $("formIntro").innerHTML = intro || "";
+  $("formIntro").hidden = !intro;
+  $("formFields").innerHTML = fields.map(f => `<div class="field"><label${f.type === "switch" ? ` id="l_${f.id}"` : ` for="f_${f.id}"`}>${esc(f.label)}</label>${
+    f.type === "switch"
+      ? `<input type="hidden" id="f_${f.id}"><div class="seg" role="group" aria-labelledby="l_${f.id}" data-field="${f.id}">${f.options.map(o => `<button type="button" data-value="${esc(o.value)}">${esc(o.label)}</button>`).join("")}</div>`
+    : f.options
+      ? `<select id="f_${f.id}" ${f.disabled ? "disabled" : ""}>${f.options.map(o => `<option value="${esc(o.value)}">${esc(o.label)}</option>`).join("")}</select>`
+      : `<input id="f_${f.id}" type="${f.type || "text"}" maxlength="${f.maxlength || 200}" placeholder="${esc(f.placeholder || "")}" autocomplete="${f.type === "password" ? "new-password" : "off"}" spellcheck="false">`
+  }${f.hint ? `<p class="hint">${esc(f.hint)}</p>` : ""}</div>`).join("");
+  for (const f of fields) { $("f_" + f.id).value = f.value ?? ""; if (f.type === "switch") showSwitch(f.id); }
+  $("formMsg").hidden = true;
+  $("formGo").textContent = submit; $("formGo").disabled = false;
+  $("formDialog").showModal();
+  const first = $("formFields").querySelector("input:not([type=hidden]), select:not([disabled])");
+  if (first) first.focus();
+}
+
+function showSwitch(id) {
+  for (const b of document.querySelector(`#formFields .seg[data-field="${id}"]`).children) {
+    const on = b.dataset.value === $("f_" + id).value;
+    b.classList.toggle("active", on);
+    b.setAttribute("aria-pressed", String(on));
+  }
+  const f = F.fields.find(x => x.id === id);
+  if (f && f.change) f.change($("f_" + id).value);
+}
+$("formFields").addEventListener("click", e => {
+  const btn = e.target.closest(".seg button[data-value]");
+  if (!btn) return;
+  const id = btn.parentElement.dataset.field;
+  $("f_" + id).value = btn.dataset.value;
+  showSwitch(id);
+});
+
+$("formEl").addEventListener("submit", async e => {
+  e.preventDefault();
+  const values = {};
+  for (const f of F.fields) values[f.id] = $("f_" + f.id).value;
+  const fail = msg => { $("formMsg").textContent = msg; $("formMsg").hidden = false; };
+  const missing = F.fields.find(f => f.required && !values[f.id].trim());
+  if (missing) return fail(`Enter the ${missing.label.toLowerCase()}.`);
+  $("formGo").disabled = true;
+  let result;
+  try {
+    result = await F.send(values);
+    $("formDialog").close();
+  } catch (err) {
+    fail(err.message);
+    $("formGo").disabled = false;
+    return;
+  }
+  await (F.refresh || settingsChanged)();
+  if (F.after) F.after(result);
+});
+$("formCancel").addEventListener("click", () => $("formDialog").close());
+
+function environmentForm(old) {
+  const current = old ? S.environments.find(e => sameEnv(e.name, old)) : null;
+  openForm({
+    title: old ? "Edit environment" : "New environment",
+    intro: old ? `Renaming <b>${esc(old)}</b> also updates its accounts, databases, their stored scans, the history and the rules.`
+      : "For example Development, Test or Production. You add its accounts and databases afterwards.",
+    fields: [
+      { id: "name", label: "Name", value: old || "", maxlength: 100, required: true },
+      { id: "machine", label: "Machine", required: true,
+        value: current && current.machine_id ? current.machine_id : S.machines.length === 1 ? S.machines[0].id : "",
+        options: [{ value: "", label: "Pick a machine…" }, ...S.machines.map(m => ({ value: m.id, label: m.name }))],
+        hint: "The machine the environment is on. A machine can have several environments." },
+    ],
+    submit: old ? "Save" : "Add environment",
+    send: v => old ? api("/api/environments/rename", null, { name: old, new_name: v.name, machine_id: Number(v.machine) })
+                   : api("/api/environments", null, { name: v.name, machine_id: Number(v.machine) }),
+  });
+}
+
+// Machines page: where the environments run
+
+const M = { machines: [] };
+
+async function loadMachines() {
+  try {
+    M.machines = (await api("/api/machines")).machines;
+    renderMachines();
+  } catch (e) {
+    $("machinesBody").innerHTML = `<div class="empty">${esc(e.message)}</div>`;
+  }
+}
+
+function renderMachines() {
+  if (!M.machines.length) {
+    $("machinesBody").innerHTML = '<div class="setsec"><div class="empty">No machines yet. Add one first: an environment can only be added once there is a machine to put it on.</div></div>';
+    return;
+  }
+  const buttons = m => ["mach-edit", "mach-delete"].map(act => {
+    const used = act === "mach-delete" && m.environments.length;
+    return iconButton(MACHINE_ACTIONS[act], `data-act="${act}" data-id="${m.id}"`, m.name, { disabled: !!used, tip: used ? "Move or remove its environments first" : MACHINE_ACTIONS[act].label });
+  }).join("");
+  $("machinesBody").innerHTML = `<div class="panel"><div class="scroll"><table id="machinesTable"><thead><tr>
+      <th>Machine</th><th>Description</th><th>Environments</th><th class="actions">Actions</th></tr></thead><tbody>${M.machines.map(m => `<tr>
+      <td><b>${esc(m.name)}</b></td>
+      <td class="wrap">${m.description ? esc(m.description) : '<span class="dim">–</span>'}</td>
+      <td>${m.environments.length ? `<div class="envchips">${m.environments.map(e => `<span>${esc(e)}</span>`).join("")}</div>` : '<span class="dim">no environment yet</span>'}</td>
+      ${rowButtons(buttons(m))}</tr>`).join("")}</tbody></table></div></div>`;
+}
+
+function machineForm(m) {
+  openForm({
+    title: m ? "Edit machine" : "Add machine",
+    intro: m ? `Renaming <b>${esc(m.name)}</b> changes it for its environments too.` : "The environments are then put on it. Nothing is created or contacted: it is only a name for where they run.",
+    fields: [
+      { id: "name", label: "Machine name", value: m ? m.name : "", maxlength: 100, required: true },
+      { id: "description", label: "Description (optional)", value: m ? m.description : "", maxlength: 255 },
+    ],
+    submit: m ? "Save" : "Add machine",
+    send: v => api(m ? `/api/machines/${m.id}` : "/api/machines", null, { name: v.name, description: v.description }),
+    refresh: loadMachines,
+  });
+}
+
+$("addMachine").addEventListener("click", () => machineForm(null));
+$("machinesBody").addEventListener("click", async e => {
+  const b = e.target.closest("button[data-act]");
+  if (!b) return;
+  const m = M.machines.find(x => x.id === Number(b.dataset.id));
+  if (!m) return;
+  if (b.dataset.act === "mach-edit") return machineForm(m);
+  const a = MACHINE_ACTIONS["mach-delete"];
+  if (!await askConfirm({ icon: a.icon, title: a.label, text: a.text(m.name), confirm: a.confirm, danger: a.danger })) return;
+  try {
+    await api(`/api/machines/${m.id}/delete`, null, {});
+    setStatus("");
+  } catch (err) {
+    setStatus(err.message, true);
+  }
+  loadMachines();
+});
+
+function accountForm(acc, environment) {
+  openForm({
+    title: acc ? "Edit account" : "New account",
+    intro: acc ? `In <b>${esc(acc.environment)}</b>. An account can't be moved to another environment.`
+      : `In <b>${esc(environment)}</b>, you can use a SQL Server login or a Microsoft Entra ID user. Once it is saved, the databases it can access are listed so you can select the ones to add.`,
+    fields: [
+      { id: "auth", label: "Sign-in", type: "switch", value: acc ? acc.auth : "sql", options: [
+        { value: "sql", label: "SQL Login" },
+        { value: "entra", label: "Microsoft Entra ID" }],
+        hint: "SQL Login uses a username and password. With Entra ID a browser window opens on the machine running this tool the first time (and again when the saved sign-in expires); no password is stored.",
+        change: v => {
+          const entra = v === "entra";
+          document.querySelector('label[for="f_username"]').textContent = entra ? "E-Mail" : "Username";
+          $("f_password").closest(".field").hidden = entra;
+        } },
+      { id: "name", label: "Name", value: acc ? acc.name : "", maxlength: 100, required: true, placeholder: "e.g. Reporting login" },
+      { id: "server", label: "Server", value: acc ? acc.server : "", maxlength: 255, required: true, placeholder: "e.g. myserver.database.windows.net,3342" },
+      { id: "username", label: "Username", value: acc ? acc.username : "", maxlength: 128, required: true },
+      { id: "password", label: "Password", type: "password", maxlength: 256,
+        hint: acc && acc.auth === "sql" && acc.has_password ? "Leave empty to keep the saved password."
+          : "Saved on the server and never shown again." },
+      { id: "trust_cert", label: "Trust server certificate", type: "switch", value: acc && acc.trust_cert ? "yes" : "no", options: [
+        { value: "yes", label: "Yes" },
+        { value: "no", label: "No" }],
+        hint: "Choose Yes for a local or self-signed server (the error “The certificate chain was issued by an authority that is not trusted”). Azure SQL and servers with a proper certificate need No." },
+    ],
+    submit: acc ? "Save" : "Add account",
+    send: v => api(acc ? `/api/accounts/${acc.id}` : "/api/accounts", null,
+      { environment: acc ? acc.environment : environment, name: v.name, server: v.server, username: v.username, password: v.auth === "entra" ? "" : v.password, auth: v.auth, trust_cert: v.trust_cert === "yes" }),
+    after: acc ? null : res => scanAccount(res.id),
+  });
+}
+
+function databaseForm(d, environment) {
+  const env = d ? d.environment : environment;
+  const accounts = S.accounts.filter(a => sameEnv(a.environment, env));
+  openForm({
+    title: d ? "Edit database" : "New database",
+    intro: d ? `In <b>${esc(env)}</b>. A database can't be moved to another environment; remove it and add it again for that.`
+      : `In <b>${esc(env)}</b>. To pick from what an account can see, use “Find databases” on the account instead.`,
+    fields: [
+      { id: "name", label: "Database name", value: d ? d.name : "", maxlength: 128, required: true },
+      { id: "account", label: "Account", value: d && d.account_id ? d.account_id : "", required: true,
+        options: [{ value: "", label: "Pick an account…" }, ...accounts.map(a => ({ value: a.id, label: `${a.name} (${a.server} · ${a.username})` }))],
+        hint: "The login used to connect to this database." },
+    ],
+    submit: d ? "Save" : "Add database",
+    send: async v => (await withCreate(create => api(d ? `/api/databases/${d.id}` : "/api/databases", null,
+      { environment: env, name: v.name, account_id: Number(v.account), create_missing: create }))).result,
+  });
+}
+
+async function testDatabase(id) {
+  S.tests.set(id, { busy: true });
+  renderSettings();
+  try {
+    S.tests.set(id, await api(`/api/databases/${id}/test`, null, {}));
+  } catch (e) {
+    S.tests.set(id, { ok: false, message: e.message });
+  }
+  renderSettings();
+}
+
+// "Find databases": asks the account's server what its login can see and lets the user tick the ones to add.
+const P = { id: null, items: [], picked: new Set(), seq: 0 };
+
+async function scanAccount(id, note) {
+  const acc = S.accounts.find(a => a.id === id);
+  if (!acc) return;
+  const seq = ++P.seq;
+  P.id = id; P.items = []; P.picked = new Set();
+  $("scanTitle").textContent = `Databases of ${acc.name}`;
+  $("scanIntro").innerHTML = `<b>${esc(acc.username)}</b> on <b>${esc(acc.server)}</b> · environment <b>${esc(acc.environment)}</b>`;
+  $("scanFilter").value = "";
+  showScanMsg(note || "");
+  $("scanList").innerHTML = `<div class="picknote">${acc.auth === "entra" ? "Connecting to the server… if a browser window opened, finish the Microsoft sign-in there." : "Connecting to the server…"}</div>`;
+  $("scanNotes").innerHTML = "";
+  $("scanAdd").disabled = $("scanRescan").disabled = true;
+  $("scanCount").textContent = "";
+  if (!$("scanDialog").open) $("scanDialog").showModal();
+  let res = null;
+  try {
+    res = await api(`/api/accounts/${id}/databases`, null, {});
+  } catch (e) {
+    if (seq !== P.seq) return;
+    $("scanList").innerHTML = "";
+    showScanMsg(e.message, true);
+    $("scanRescan").disabled = false;
+    return;
+  }
+  if (seq !== P.seq) return;
+  P.items = res.databases;
+  P.picked = new Set(res.databases.filter(x => x.status === "new" || x.status === "unassigned").map(x => x.name));
+  const notes = [];
+  if (res.skipped.length) notes.push(`Not offered because their names have characters this tool can't use: ${res.skipped.map(esc).join(", ")}.`);
+  if (res.gone.length) notes.push(`Added with this account but no longer listed by the server: ${res.gone.map(esc).join(", ")}.`);
+  $("scanNotes").innerHTML = notes.map(n => `<p class="hint">${n}</p>`).join("");
+  $("scanRescan").disabled = false;
+  renderScan();
+}
+
+function showScanMsg(text, isError) {
+  $("scanMsg").hidden = !text;
+  $("scanMsg").textContent = text;
+  $("scanMsg").className = "result" + (isError ? " error" : "");
+}
+
+const scanTag = x => ({
+  added: '<span class="dim">already added</span>',
+  unassigned: '<span class="tag off">needs an account</span><span class="dim">gets this one</span>',
+  other: `<span class="dim">uses ${esc(x.account)}</span>`,
+  new: '<span class="dim">new</span>',
+}[x.status]);
+
+function renderScan() {
+  const q = $("scanFilter").value.trim().toLowerCase();
+  const shown = P.items.filter(x => !q || x.name.toLowerCase().includes(q));
+  $("scanList").innerHTML = shown.length ? shown.map(x => {
+    const fixed = x.status === "added" || x.status === "other";
+    return `<label class="prow dbrow ${fixed ? "dis" : ""}"><input type="checkbox" data-db="${esc(x.name)}" ${fixed || P.picked.has(x.name) ? "checked" : ""} ${fixed ? "disabled" : ""}>
+      <span class="nm">${esc(x.name)}</span>${scanTag(x)}</label>`;
+  }).join("") : `<div class="picknote">${P.items.length ? "No databases match." : "This login can't see any database besides the system ones."}</div>`;
+  const open = P.items.filter(x => x.status === "new" || x.status === "unassigned").length;
+  $("scanCount").textContent = open ? `${P.picked.size} of ${open} selected` : "nothing left to add";
+  $("scanAdd").textContent = P.picked.size ? `Add ${P.picked.size} selected` : "Add selected";
+  $("scanAdd").disabled = !P.picked.size;
+}
+
+$("scanFilter").addEventListener("input", renderScan);
+$("scanList").addEventListener("change", e => {
+  const box = e.target.closest("input[data-db]");
+  if (!box) return;
+  if (box.checked) P.picked.add(box.dataset.db); else P.picked.delete(box.dataset.db);
+  renderScan();
+});
+$("scanAll").addEventListener("click", () => {
+  const q = $("scanFilter").value.trim().toLowerCase();
+  for (const x of P.items) if ((x.status === "new" || x.status === "unassigned") && (!q || x.name.toLowerCase().includes(q))) P.picked.add(x.name);
+  renderScan();
+});
+$("scanNone").addEventListener("click", () => { P.picked.clear(); renderScan(); });
+$("scanRescan").addEventListener("click", () => scanAccount(P.id));
+$("scanClose").addEventListener("click", () => $("scanDialog").close());
+$("scanDialog").addEventListener("close", () => { P.seq++; });
+$("scanAdd").addEventListener("click", async () => {
+  const id = P.id, names = [...P.picked];
+  $("scanAdd").disabled = true;
+  try {
+    const { result: r, created } = await withCreate(create => api(`/api/accounts/${id}/databases/add`, null, { names, create_missing: create }));
+    const parts = [];
+    if (created.length) parts.push(`${plural(created.length, "database", "databases")} created in the Databases list`);
+    if (r.added.length) parts.push(`${plural(r.added.length, "database", "databases")} added`);
+    if (r.assigned.length) parts.push(`${plural(r.assigned.length, "database", "databases")} now using this account`);
+    await settingsChanged();
+    scanAccount(id, (parts.join(", ") || "Nothing to add") + ". They now show up in the Indexes view and in the rules.");
+  } catch (e) {
+    showScanMsg(e.message, true);
+    $("scanAdd").disabled = false;
+  }
+});
+
+$("settingsBody").addEventListener("click", async e => {
+  const b = e.target.closest("button[data-act]");
+  if (!b) return;
+  e.preventDefault();      // a button in an environment's header must not also fold the card
+  const { act, name, env } = b.dataset, id = Number(b.dataset.id);
+  const acc = S.accounts.find(a => a.id === id), d = S.databases.find(x => x.id === id);
+  try {
+    if (act === "env-add") return environmentForm(null);
+    if (act === "env-rename") return environmentForm(name);
+    if (act === "acc-add") return accountForm(null, env);
+    if (act === "acc-edit" && acc) return accountForm(acc);
+    if (act === "acc-scan" && acc) return scanAccount(acc.id);
+    if (act === "db-add") return databaseForm(null, env);
+    if (act === "db-edit" && d) return databaseForm(d);
+    if (act === "db-test" && d) return testDatabase(d.id);
+    if (act === "env-delete") {
+      const a = ENV_ACTIONS["env-delete"];
+      if (!await askConfirm({ icon: a.icon, title: a.label, text: a.text(name), confirm: a.confirm, danger: a.danger })) return;
+      await api("/api/environments/delete", null, { name });
+    } else if (act === "acc-delete" && acc) {
+      const a = ACCOUNT_ACTIONS["acc-delete"];
+      if (!await askConfirm({ icon: a.icon, title: a.label, text: a.text(acc.name), confirm: a.confirm, danger: a.danger })) return;
+      await api(`/api/accounts/${acc.id}/delete`, null, {});
+    } else if (act === "db-delete" && d) {
+      const a = DATABASE_ACTIONS["db-delete"];
+      if (!await askConfirm({ icon: a.icon, title: a.label, text: a.text(d.name, d.environment), confirm: a.confirm, danger: a.danger })) return;
+      await api(`/api/databases/${d.id}/delete`, null, {});
+    } else {
+      return;
+    }
+    await settingsChanged();
+  } catch (err) {
+    alert(err.message);
+  }
+});
+
+// events
+
+$("environment").addEventListener("change", () => loadDatabases().catch(e => setStatus(e.message, true)));
+$("database").addEventListener("change", loadSnapshot);
+$("scanIndexes").addEventListener("click", () => scan("indexes"));
+$("scanFrag").addEventListener("click", () => scan("fragmentation"));
+$("nav").addEventListener("click", e => { const b = e.target.closest("button"); if (b) showView(b.dataset.view); });
+$("refreshHistory").addEventListener("click", loadHistory);
+$("historyBody").addEventListener("click", e => {
+  const b = e.target.closest("button[data-page]");
+  if (!b || b.disabled) return;
+  jobsView.page = Number(b.dataset.page);
+  loadHistory();
+});
+let historyFilterTimer;
+$("historyBody").addEventListener("input", e => {
+  const name = e.target.dataset.filter;
+  if (!name) return;
+  jobsView.filters[name] = e.target.value.trim();
+  clearTimeout(historyFilterTimer);
+  historyFilterTimer = setTimeout(() => { jobsView.page = 1; loadHistory(); }, 300);
+});
+$("historyBody").addEventListener("click", e => {
+  if (!e.target.closest("#historyClear")) return;
+  jobsView.filters = {};
+  for (const box of $("historyBody").querySelectorAll("[data-filter]")) box.value = "";
+  closeRange();
+  syncRanges();
+  jobsView.page = 1;
+  loadHistory();
+});
+
+// Range popup: from/to (or min/max) boxes for the clicked button; filters apply as you type.
+const rangePop = { name: null, btn: null };
+function syncRanges() {
+  for (const btn of $("historyBody").querySelectorAll("button[data-range]")) {
+    btn.textContent = rangeLabel(btn.dataset.range);
+    btn.classList.toggle("on", rangeActive(btn.dataset.range));
+  }
+}
+function closeRange() {
+  if (!rangePop.name) return;
+  $("rangePop").hidden = true;
+  rangePop.btn.setAttribute("aria-expanded", "false");
+  rangePop.name = rangePop.btn = null;
+}
+function openRange(btn) {
+  const name = btn.dataset.range, r = RANGES[name];
+  if (rangePop.name === name) return closeRange();
+  closeRange();
+  Object.assign(rangePop, { name, btn });
+  btn.setAttribute("aria-expanded", "true");
+  $("rangeTitle").textContent = r.title;
+  for (const [id, key, word] of [["rangeFrom", r.from, r.date ? "From" : "At least"], ["rangeTo", r.to, r.date ? "To" : "At most"]]) {
+    const input = $(id);
+    input.type = r.date ? "date" : "number";
+    input.min = r.date ? "" : "0"; input.step = r.date ? "" : "any";
+    input.value = jobsView.filters[key] || "";
+    $(id + "Label").textContent = r.date ? word : `${word} (seconds)`;
+  }
+  const pop = $("rangePop");
+  pop.hidden = false;
+  const box = btn.getBoundingClientRect();
+  pop.style.top = `${box.bottom + 6}px`;
+  pop.style.left = `${Math.max(8, Math.min(box.left, innerWidth - pop.offsetWidth - 8))}px`;
+  $("rangeFrom").focus();
+}
+$("historyBody").addEventListener("click", e => {
+  const btn = e.target.closest("button[data-range]");
+  if (btn) openRange(btn);
+});
+$("rangePop").addEventListener("input", e => {
+  const key = e.target.id === "rangeFrom" ? RANGES[rangePop.name].from : e.target.id === "rangeTo" ? RANGES[rangePop.name].to : null;
+  if (!key) return;
+  jobsView.filters[key] = e.target.value.trim();
+  syncRanges();
+  clearTimeout(historyFilterTimer);
+  historyFilterTimer = setTimeout(() => { jobsView.page = 1; loadHistory(); }, 300);
+});
+$("rangeClear").addEventListener("click", () => {
+  const r = RANGES[rangePop.name];
+  jobsView.filters[r.from] = jobsView.filters[r.to] = "";
+  $("rangeFrom").value = $("rangeTo").value = "";
+  syncRanges();
+  jobsView.page = 1;
+  loadHistory();
+});
+$("rangeDone").addEventListener("click", () => { const b = rangePop.btn; closeRange(); if (b) b.focus(); });
+document.addEventListener("click", e => { if (rangePop.name && !e.target.closest("#rangePop, button[data-range]")) closeRange(); });
+document.addEventListener("keydown", e => { if (e.key === "Escape" && rangePop.name) { const b = rangePop.btn; closeRange(); b.focus(); } });
+addEventListener("resize", closeRange);
+$("historyBody").addEventListener("scroll", closeRange, true);
+$("historyBody").addEventListener("change", e => {
+  if (e.target.id !== "historySize") return;
+  jobsView.size = Number(e.target.value);
+  e.target.blur();
+  jobsView.page = 1;
+  try { localStorage.setItem("historyPageSize", jobsView.size); } catch (err) { /* not remembered */ }
+  loadHistory();
+});
+
+// account menu and profile
+function setMenu(open) {
+  $("userMenu").hidden = !open;
+  $("avatar").setAttribute("aria-expanded", String(open));
+}
+$("avatar").addEventListener("click", e => { e.stopPropagation(); setMenu($("userMenu").hidden); });
+document.addEventListener("click", e => { if (!$("userMenu").contains(e.target)) setMenu(false); });
+document.addEventListener("keydown", e => { if (e.key === "Escape" && !$("userMenu").hidden) { setMenu(false); $("avatar").focus(); } });
+$("menuProfile").addEventListener("click", () => { setMenu(false); showView("profile"); });
+$("menuMachines").addEventListener("click", () => { setMenu(false); showView("machines"); });
+$("menuEnvironments").addEventListener("click", () => { setMenu(false); showView("settings"); });
+$("menuDatabases").addEventListener("click", () => { setMenu(false); showView("databases"); });
+$("menuUsers").addEventListener("click", () => { setMenu(false); showView("users"); });
+
+const initialOf = name => (Array.from(name.trim())[0] || "?").toUpperCase();
+let isAdmin = false;   // the Machines, Environments, Databases and Users pages and their endpoints are for administrators only
+let myName = "";
+function showMe(me) {
+  isAdmin = me.role === "admin";
+  $("menuMachines").hidden = !isAdmin;
+  $("menuEnvironments").hidden = !isAdmin;
+  $("menuDatabases").hidden = !isAdmin;
+  $("menuUsers").hidden = !isAdmin;
+  myName = me.username;
+  const initial = initialOf(me.username);
+  $("avatar").textContent = initial;
+  $("avatar").title = me.username;
+  $("whoName").textContent = me.username;
+  $("profileAvatar").textContent = initial;
+  $("profileName").textContent = me.username;
+  $("profileUser").textContent = me.username;
+  const role = me.role === "admin" ? "Administrator" : me.role === "user" ? "User" : "–";
+  $("profileRole").textContent = role;
+  $("profileRoleText").textContent = role;
+  $("profileCreated").textContent = me.created_at ? fmtTime(me.created_at) : "–";
+  myTz = me.timezone || "";
+  fillProfileZones();
+}
+
+// time zone and clocks (My profile)
+
+let myTz = "";                                  // the IANA zone the user saved; "" = none yet, this browser's is used
+const server = { drift: 0, offset: 0, label: "", synced: 0 };    // the server's clock: ms ahead of this one, minutes from UTC
+
+// Shows the saved zone, else the browser's (not saved until the user saves it).
+const shownZone = () => myTz || BROWSER_TZ || "UTC";
+
+function fillProfileZones() {
+  const zone = shownZone();
+  const zones = ZONES.includes(zone) ? ZONES : [zone, ...ZONES];
+  $("profileTz").innerHTML = zones.map(z => `<option value="${esc(z)}">${esc(z)}</option>`).join("");
+  $("profileTz").value = zone;
+  $("tzStatus").textContent = "";
+  $("saveTz").disabled = !!myTz;                // nothing saved yet: the filled-in zone can be saved as it is
+}
+
+// "UTC+03:00" style offset of a zone at a given moment
+function zoneOffset(date, zone) {
+  try {
+    const part = new Intl.DateTimeFormat("en", { timeZone: zone, timeZoneName: "longOffset" }).formatToParts(date).find(p => p.type === "timeZoneName");
+    return part ? part.value.replace("GMT", "UTC") : "";
+  } catch { return ""; }
+}
+
+const clockTime = (date, zone) => date.toLocaleTimeString([], { timeZone: zone, hour: "2-digit", minute: "2-digit", second: "2-digit" });
+const clockDate = (date, zone) => date.toLocaleDateString([], { timeZone: zone, weekday: "short", year: "numeric", month: "short", day: "numeric" });
+
+async function syncServerTime() {
+  const before = Date.now();
+  try {
+    const t = await api("/api/time");
+    server.drift = Date.parse(t.server_time) - (before + Date.now()) / 2;     // compare against the request's midpoint
+    server.offset = t.offset_minutes; server.label = t.timezone; server.synced = Date.now();
+  } catch { /* the clock keeps going on the last sync */ }
+  tickClocks();
+}
+
+function startClocks() {
+  fillProfileZones();
+  tickClocks();
+  syncServerTime();
+}
+
+function tickClocks() {
+  if ($("profileView").hidden) return;
+  const now = new Date();
+  const zone = $("profileTz").value || shownZone();       // the zone picked in the list, saved or not
+  $("clockMine").textContent = clockTime(now, zone);
+  $("clockMineSub").textContent = clockDate(now, zone) + " · " + zone + " (" + zoneOffset(now, zone) + ")";
+  if (server.label) {
+    const wall = new Date(Date.now() + server.drift + server.offset * 60000);      // read with the UTC fields: the offset is already added
+    $("clockServer").textContent = clockTime(wall, "UTC");
+    $("clockServerSub").textContent = clockDate(wall, "UTC") + " · " + server.label;
+    if (Date.now() - server.synced > 60000) { server.synced = Date.now(); syncServerTime(); }     // follow a change of the server's offset (daylight saving)
+  }
+}
+
+$("profileTz").addEventListener("change", () => {
+  $("saveTz").disabled = $("profileTz").value === myTz;
+  $("tzStatus").textContent = "";
+  tickClocks();
+});
+
+$("saveTz").addEventListener("click", async () => {
+  const chosen = $("profileTz").value;
+  $("saveTz").disabled = true; $("profileTz").disabled = true;
+  try {
+    await api("/api/me/timezone", null, { timezone: chosen });
+    myTz = chosen;
+    $("tzStatus").textContent = "";
+  } catch (e) {
+    $("saveTz").disabled = false;
+    $("tzStatus").textContent = e.message;
+  } finally {
+    $("profileTz").disabled = false;
+    tickClocks();
+  }
+});
+
+// Databases page: the list of databases the environments can use
+
+const C = { databases: [] };
+
+async function loadCatalog() {
+  try {
+    C.databases = (await api("/api/catalog")).databases;
+    renderCatalog();
+  } catch (e) {
+    $("catalogBody").innerHTML = `<div class="empty">${esc(e.message)}</div>`;
+  }
+}
+
+function renderCatalog() {
+  if (!C.databases.length) {
+    $("catalogBody").innerHTML = '<div class="setsec"><div class="empty">No databases yet. Add one, or pick some from what an account can see under Environments.</div></div>';
+    return;
+  }
+  const buttons = d => ["cat-edit", "cat-delete"].map(act => {
+    const used = act === "cat-delete" && d.environments.length;
+    return iconButton(CATALOG_ACTIONS[act], `data-act="${act}" data-id="${d.id}"`, d.name, { disabled: !!used, tip: used ? "Remove it from its environments first" : CATALOG_ACTIONS[act].label });
+  }).join("");
+  $("catalogBody").innerHTML = `<div class="panel"><div class="scroll"><table id="catalogTable"><thead><tr>
+      <th>Database</th><th>Description</th><th>Used in</th><th class="actions">Actions</th></tr></thead><tbody>${C.databases.map(d => `<tr>
+      <td><b>${esc(d.name)}</b></td>
+      <td class="wrap">${d.description ? esc(d.description) : '<span class="dim">–</span>'}</td>
+      <td>${d.environments.length ? `<div class="envchips">${d.environments.map(e => `<span>${esc(e)}</span>`).join("")}</div>` : '<span class="dim">no environment yet</span>'}</td>
+      ${rowButtons(buttons(d))}</tr>`).join("")}</tbody></table></div></div>`;
+}
+
+function catalogForm(d) {
+  openForm({
+    title: d ? "Edit database" : "Add database",
+    intro: d ? `Renaming <b>${esc(d.name)}</b> renames it in every environment that uses it; its stored scans and the rules that list it follow. Nothing is changed on the SQL Server.`
+      : "It can then be added to the environments. Nothing is created on any SQL Server.",
+    fields: [
+      { id: "name", label: "Database name", value: d ? d.name : "", maxlength: 128, required: true },
+      { id: "description", label: "Description (optional)", value: d ? d.description : "", maxlength: 255 },
+    ],
+    submit: d ? "Save" : "Add database",
+    send: v => api(d ? `/api/catalog/${d.id}` : "/api/catalog", null, { name: v.name, description: v.description }),
+    refresh: async () => { await loadCatalog(); loadEnvironments().catch(() => {}); },
+  });
+}
+
+$("addCatalog").addEventListener("click", () => catalogForm(null));
+$("catalogBody").addEventListener("click", async e => {
+  const b = e.target.closest("button[data-act]");
+  if (!b) return;
+  const d = C.databases.find(x => x.id === Number(b.dataset.id));
+  if (!d) return;
+  if (b.dataset.act === "cat-edit") return catalogForm(d);
+  const a = CATALOG_ACTIONS["cat-delete"];
+  if (!await askConfirm({ icon: a.icon, title: a.label, text: a.text(d.name), confirm: a.confirm, danger: a.danger })) return;
+  try {
+    await api(`/api/catalog/${d.id}/delete`, null, {});
+    setStatus("");
+  } catch (err) {
+    setStatus(err.message, true);
+  }
+  loadCatalog();
+});
+
+const U = { users: [] };
+
+async function loadUsers() {
+  try {
+    U.users = (await api("/api/users")).users;
+    renderUsers();
+  } catch (e) {
+    $("usersBody").innerHTML = `<div class="empty">${esc(e.message)}</div>`;
+  }
+}
+
+function renderUsers() {
+  const mine = u => u.username.toLowerCase() === myName.toLowerCase();
+  const action = u => {
+    if (mine(u)) return '<span class="dim" title="Change your own password from My profile">you</span>';
+    if (u.system) return '<span class="dim" title="The account the system created always stays an administrator, cannot be removed, and only its owner can change its password">protected</span>';
+    return [u.role === "admin" ? "make-user" : "make-admin", "reset", "delete"].map(act => userButton(act, u.username)).join("");
+  };
+  $("usersBody").innerHTML = `<div class="panel"><div class="scroll"><table><thead><tr>
+      <th>Username</th><th>Role</th><th>Created</th><th>Password</th><th class="actions">Actions</th></tr></thead><tbody>${U.users.map(u => `<tr>
+      <td><b>${esc(u.username)}</b>${u.system ? '<span class="tag" title="Created by the system">system</span>' : ""}</td>
+      <td>${u.role === "admin" ? "Administrator" : "User"}</td>
+      <td>${esc(fmtTime(u.created_at))}</td>
+      <td>${u.must_change_password ? '<span class="st-running">waiting for first sign-in</span>' : '<span class="dim">chosen by the user</span>'}</td>
+      ${rowButtons(action(u))}</tr>`).join("")}</tbody></table></div></div>`;
+}
+
+$("usersBody").addEventListener("click", async e => {
+  const b = e.target.closest("button[data-act]");
+  if (!b) return;
+  const { act, name } = b.dataset;
+  const a = USER_ACTIONS[act];
+  if (!await askConfirm({ icon: a.icon, title: a.label, text: a.text(name), confirm: a.confirm, danger: a.danger })) return;
+  b.disabled = true;
+  try {
+    if (act === "reset") {
+      const made = await api("/api/users/reset-password", null, { username: name });
+      showPassword("Password reset", made);
+    } else if (act === "delete") {
+      await api("/api/users/delete", null, { username: name });
+    } else {
+      await api("/api/users/role", null, { username: name, role: act === "make-admin" ? "admin" : "user" });
+    }
+    setStatus("");
+  } catch (err) {
+    setStatus(err.message, true);
+  }
+  loadUsers();
+});
+
+function showPassword(title, made) {
+  $("newUserTitle").textContent = title;
+  $("newUserName").textContent = made.username;
+  $("newUserPassword").textContent = made.password;
+  $("copyPassword").textContent = "Copy";
+  $("newUserDialog").showModal();
+}
+
+$("addUser").addEventListener("click", () => openForm({
+  title: "Add user",
+  intro: "Enter the name they will sign in with. A password is made for them and shown once, for you to send to them.",
+  fields: [{ id: "username", label: "Username", maxlength: 64, required: true }],
+  submit: "Create user",
+  send: v => api("/api/users", null, { username: v.username }),
+  refresh: loadUsers,
+  after: made => showPassword("User created", made),
+}));
+
+$("copyPassword").addEventListener("click", async () => {
+  try {
+    await navigator.clipboard.writeText($("newUserPassword").textContent);
+    $("copyPassword").textContent = "Copied";
+  } catch (err) {         // no clipboard access (plain http on another host): select it so Ctrl+C works
+    getSelection().selectAllChildren($("newUserPassword"));
+    $("copyPassword").textContent = "Press Ctrl+C";
+  }
+});
+$("newUserDone").addEventListener("click", () => {
+  $("newUserDialog").close();
+  $("newUserPassword").textContent = "";
+});
+
+$("changePassword").addEventListener("click", () => openForm({
+  title: "Change password",
+  intro: "The other places you are signed in with the old password are signed out.",
+  fields: [
+    { id: "current", label: "Current password", type: "password", maxlength: 1024, required: true },
+    { id: "next", label: "New password", type: "password", maxlength: 1024, required: true, hint: "At least 8 characters." },
+    { id: "again", label: "New password again", type: "password", maxlength: 1024, required: true },
+  ],
+  submit: "Change password",
+  send: v => {
+    if (v.next !== v.again) throw new Error("The two new passwords are different.");
+    return api("/api/me/password", null, { current_password: v.current, new_password: v.next });
+  },
+  refresh: async () => setStatus("Password changed.", false),
+}));
+
+$("logout").addEventListener("click", async () => { await api("/api/logout", null, {}).catch(() => {}); location.href = "/login"; });
+$("filter").addEventListener("input", e => { state.filter = e.target.value; render(); });
+
+$("groupBy").addEventListener("click", e => {
+  const btn = e.target.closest("button");
+  if (!btn) return;
+  state.groupBy = btn.dataset.g;
+  state.open.clear();
+  for (const b of $("groupBy").children) b.classList.toggle("active", b === btn);
+  render();
+});
+
+$("groups").addEventListener("click", e => {
+  const th = e.target.closest("th[data-sort]");
+  if (!th) return;
+  const key = th.dataset.sort;
+  state.sort = { key, dir: state.sort.key === key ? -state.sort.dir : (columns().find(c => c.key === key).num ? -1 : 1) };
+  render();
+});
+
+// Remember which environment cards are open across re-renders.
+$("settingsBody").addEventListener("toggle", e => {
+  if (!e.target.matches("details.setsec")) return;
+  const key = e.target.dataset.name.toLowerCase();
+  if (e.target.open) S.open.add(key); else S.open.delete(key);
+}, true);
+
+// Remember open groups across re-renders (sort, filter, scan).
+$("groups").addEventListener("toggle", e => {
+  if (e.target.matches("details.group")) state.open.set(e.target.dataset.name, e.target.open);
+}, true);
+
+fetch("/api/version").then(r => r.json()).then(v => {
+  $("appVersion").textContent = "v" + v.version + (v.commit ? " (" + v.commit + ")" : "");
+  $("appVersion").title = v.commit ? "Version " + v.version + ", built from commit " + v.commit.replace("+", "") + (v.commit.endsWith("+") ? " with changes that are not committed" : "") : "Version " + v.version;
+}).catch(() => {});
+
+api("/api/me").then(me => { showMe(me); return loadEnvironments(); }).catch(e => setStatus(e.message, true));
+</script>
+</body>
+</html>
