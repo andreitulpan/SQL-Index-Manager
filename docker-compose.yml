@@ -1,0 +1,20 @@
+services:
+  sql-index-manager:
+    image: dreytechlabs/sql-index-manager
+    container_name: sql-index-manager
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8765:8765"
+    volumes:
+      - data:/app/data
+    environment:
+      APP_THEME: azure  # or ocean
+      # The app keeps its own data in SQLite in the volume. To use a database server instead, set these
+      # (see the README); the database must already exist.
+      # APP_DB_URL: postgresql://user:password@host:5432/sql_index_manager
+      # APP_DB_HOST: host:5432
+      # APP_DB_USER: user
+      # APP_DB_PASSWORD: password
+
+volumes:
+  data:
