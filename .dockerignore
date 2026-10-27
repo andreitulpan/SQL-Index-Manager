@@ -1,0 +1,19 @@
+.git
+.gitignore
+.dockerignore
+Dockerfile
+docker-compose.yml
+README.md
+
+# Local data and secrets must never end up in an image
+data/
+.auth/
+*.sqlite3*
+.env
+.env.*
+
+__pycache__/
+*.py[cod]
+.venv/
+.vscode/
+.idea/

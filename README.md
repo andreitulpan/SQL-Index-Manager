@@ -83,6 +83,30 @@ python app.py
 
 The server starts on <http://127.0.0.1:8765> and opens it in your browser.
 
+### Docker
+
+The image includes the ODBC driver, so nothing else needs installing. Building it accepts Microsoft's
+[ODBC driver license terms](https://learn.microsoft.com/sql/connect/odbc/linux-mac/installing-the-microsoft-odbc-driver-for-sql-server).
+
+```bash
+docker compose up -d --build
+docker compose logs # shows the one-time admin password
+```
+
+Without Compose:
+
+```bash
+docker build -t sql-index-manager .
+docker run -d --name sql-index-manager \
+  -p 127.0.0.1:8765:8765 \
+  -v sql-index-manager-data:/app/data \
+  sql-index-manager
+```
+
+Publish the port on `127.0.0.1` as above unless you put something in front of the app (see Security notes). The
+`APP_DB_*` and `APP_THEME` settings below work as `-e` variables. Entra ID sign-in needs a browser on the
+machine running the app, so inside a container use SQL logins.
+
 ### First sign-in
 
 On the first start with an empty database, the app creates an `admin` user with a **random password** and prints it
@@ -154,8 +178,9 @@ Local data lives next to `app.py`: `data/` (the SQLite file) and `.auth/` (saved
 
 ## Security notes
 
-- The server listens only on `127.0.0.1`. Failed sign-ins are **not rate-limited**, so do not expose it to other
-  machines without putting something in front of it.
+- The server listens only on `127.0.0.1` (the Docker image sets `APP_HOST=0.0.0.0` so the published port works; bind
+  that port to `127.0.0.1` too). Failed sign-ins are **not rate-limited**, so do not expose it to other machines
+  without putting something in front of it. Only the `Host` headers `127.0.0.1` and `localhost` are accepted.
 - Connections to managed databases use `Encrypt=yes` and certificate validation unless you opt out per account.
 - The passwords of the **accounts used to reach your databases** have to be sent to the server, so they are stored
   as typed in the app's database. Protect that database and `data/`, and prefer Entra ID where you can.

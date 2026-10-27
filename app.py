@@ -33,13 +33,14 @@ The app creates its tables but never the database.
 
 APP_THEME (or --theme): azure (default) or ocean.
 
-The server listens only on 127.0.0.1. Failed sign-ins are not rate-limited, so don't expose it to
-other machines.
+The server listens only on 127.0.0.1 unless APP_HOST says otherwise (the Docker image sets 0.0.0.0).
+Failed sign-ins are not rate-limited, so don't expose it to other machines.
 """
 from __future__ import annotations
 
 import argparse
 import functools
+import os
 import platform
 import sys
 import threading
@@ -61,7 +62,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from indexmanager import auth, busy, db, dbconfig, indexes, log, passwords, rules, schedule, store, storedb, theme, version
 
-HOST, PORT = "127.0.0.1", 8765
+HOST, PORT = os.environ.get("APP_HOST", "127.0.0.1"), 8765
 STATIC_DIR = Path(__file__).resolve().parent / "indexmanager" / "static"
 
 @asynccontextmanager
@@ -80,7 +81,7 @@ async def lifespan(_app: FastAPI):
 
 app = FastAPI(title="SQL Index Manager", version=version.VERSION, lifespan=lifespan)
 # Blocks DNS rebinding: reject requests whose Host header isn't local.
-app.add_middleware(TrustedHostMiddleware, allowed_hosts=[HOST, "localhost"])
+app.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost"])
 
 
 @app.exception_handler(store.Conflict)
@@ -1123,7 +1124,8 @@ def main() -> None:
         log.error("Cannot start", error=exc)
         sys.exit(2)
     log.info("Connected to the app database", engine=cfg.engine)
-    threading.Timer(1.0, lambda: webbrowser.open(f"http://{HOST}:{PORT}")).start()
+    if HOST == "127.0.0.1":
+        threading.Timer(1.0, lambda: webbrowser.open(f"http://{HOST}:{PORT}")).start()
     uvicorn.run(app, host=HOST, port=PORT, log_level="warning")
     log.info("Stopped")
 
